@@ -7,6 +7,11 @@ class ModelMatchingTest(unittest.TestCase):
     def test_explains_mismatch_reason(self) -> None:
         cases = [
             (
+                "Apple AirPods Pro 2",
+                "Bingo VT-i11 AirPods Pro 2",
+                "brand",
+            ),
+            (
                 "Смартфон Samsung SM-A556E",
                 "Чехол для Samsung SM-A556E",
                 "accessory",
@@ -30,6 +35,11 @@ class ModelMatchingTest(unittest.TestCase):
                 "Apple iPhone 16 Pro",
                 "Apple iPhone 16 Pro Max",
                 "version",
+            ),
+            (
+                "DeLonghi ECAM 22.110.B",
+                "DeLonghi ECAM 22.114.B",
+                "model_code",
             ),
         ]
 
@@ -79,8 +89,8 @@ class ModelMatchingTest(unittest.TestCase):
                 "Samsung Galaxy A55 SM-A556E",
             ),
             (
-                "Духовой шкаф HBA-534-EB3",
-                "Духовой шкаф HBA534EB3",
+                "Духовой шкаф Bosch HBA-534-EB3",
+                "Духовой шкаф Bosch HBA534EB3",
             ),
         ]
 
