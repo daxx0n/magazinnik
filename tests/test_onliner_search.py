@@ -28,6 +28,51 @@ def raw_product(
 
 
 class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
+    def test_sorts_iphone_generation_and_versions(self) -> None:
+        source = OnlinerSource()
+        products = [
+            source._parse_candidate(
+                raw_product(key, title)
+            )
+            for key, title in [
+                ("15", "Apple iPhone 15 128GB (черный)"),
+                ("16pro", "Apple iPhone 16 Pro 256GB"),
+                ("17pm", "Apple iPhone 17 Pro Max 256GB"),
+                ("air", "Apple iPhone Air 256GB"),
+                ("17", "Apple iPhone 17 256GB (черный)"),
+                ("16", "Apple iPhone 16 128GB"),
+                (
+                    "17produal",
+                    "Apple iPhone 17 Pro Dual SIM 256GB",
+                ),
+                ("17pro", "Apple iPhone 17 Pro 256GB"),
+            ]
+        ]
+        candidates = [
+            product
+            for product in products
+            if product is not None
+        ]
+
+        sorted_products = source._sort_product_family(
+            candidates,
+            "iPhone",
+        )
+
+        self.assertEqual(
+            [product.key for product in sorted_products],
+            [
+                "17",
+                "17pro",
+                "17produal",
+                "17pm",
+                "air",
+                "16",
+                "16pro",
+                "15",
+            ],
+        )
+
     async def test_loads_all_pages_and_groups_colors(self) -> None:
         source = OnlinerSource()
         source._create_client = lambda: FakeClient()
