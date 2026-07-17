@@ -165,8 +165,9 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             ["found", "filtered", "not_found"],
         )
         service._search_five_element_by_query.assert_awaited_once_with(
-            query="Bosch HBA534EB3",
+            query="Духовой шкаф Bosch HBA534EB3",
             canonical_title=canonical,
+            requested_title="Bosch HBA534EB3",
         )
 
     def test_formats_all_status_variants(self) -> None:
