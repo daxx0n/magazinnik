@@ -4,6 +4,10 @@ import re
 
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
+from app.models.search_result import (
+    ComparisonResult,
+    SourceSearchStatus,
+)
 from app.sources.five_element import (
     FiveElementSource,
 )
@@ -129,7 +133,7 @@ class PriceService:
     async def search_all_sources_by_onliner_key(
         self,
         product_key: str,
-    ) -> list[ProductOffer]:
+    ) -> ComparisonResult:
         """Собирает общий топ цен для выбранной модели."""
 
         onliner_offers = (
@@ -139,7 +143,15 @@ class PriceService:
         )
 
         if not onliner_offers:
-            return []
+            return ComparisonResult(
+                offers=[],
+                source_statuses=[
+                    SourceSearchStatus(
+                        source="Onliner",
+                        state="not_found",
+                    )
+                ],
+            )
 
         canonical_title = onliner_offers[0].title
         cross_source_query = (
@@ -163,9 +175,16 @@ class PriceService:
         )
 
         combined_offers = list(onliner_offers)
+        source_statuses = [
+            SourceSearchStatus(
+                source="Onliner",
+                state="found",
+                matched_offers=len(onliner_offers),
+            )
+        ]
 
         for source_name, result in (
-            ("5element", five_result),
+            ("5 элемент", five_result),
             ("21vek", twenty_one_result),
         ):
             if isinstance(result, BaseException):
@@ -174,27 +193,59 @@ class PriceService:
                     source_name,
                     result,
                 )
+                source_statuses.append(
+                    SourceSearchStatus(
+                        source=source_name,
+                        state="unavailable",
+                    )
+                )
                 continue
 
-            combined_offers.extend(
-                offer
-                for offer in result
-                if self._matches_model(
-                    canonical_title,
-                    offer.title,
+            if source_name == "5 элемент":
+                source_offers, had_candidates = result
+            else:
+                had_candidates = bool(result)
+                source_offers = [
+                    offer
+                    for offer in result
+                    if self._matches_model(
+                        canonical_title,
+                        offer.title,
+                    )
+                ]
+
+            combined_offers.extend(source_offers)
+
+            if source_offers:
+                state = "found"
+            elif had_candidates:
+                state = "filtered"
+            else:
+                state = "not_found"
+
+            source_statuses.append(
+                SourceSearchStatus(
+                    source=source_name,
+                    state=state,
+                    matched_offers=len(source_offers),
                 )
             )
 
-        return self._prepare_aggregate_offers(
+        offers = self._prepare_aggregate_offers(
             offers=combined_offers,
             limit=5,
+        )
+
+        return ComparisonResult(
+            offers=offers,
+            source_statuses=source_statuses,
         )
 
     async def _search_five_element_by_query(
         self,
         query: str,
         canonical_title: str,
-    ) -> list[ProductOffer]:
+    ) -> tuple[list[ProductOffer], bool]:
         """Получает цену лучшей карточки 5 элемента."""
 
         products = await self.find_five_element_products(
@@ -207,13 +258,16 @@ class PriceService:
                 product.title,
             ):
                 return (
-                    await self
-                    .search_five_element_key(
-                        product.key
-                    )
+                    (
+                        await self
+                        .search_five_element_key(
+                            product.key
+                        )
+                    ),
+                    True,
                 )
 
-        return []
+        return [], bool(products)
 
     @staticmethod
     def _build_cross_source_query(
