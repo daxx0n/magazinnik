@@ -65,6 +65,8 @@ class OnlinerSource:
 
         candidates: list[ProductCandidate] = []
         used_keys: set[str] = set()
+        primary_category: str | None = None
+        pages_without_primary_products = 0
         page = 1
 
         async with self._create_client() as client:
@@ -104,6 +106,21 @@ class OnlinerSource:
                     ):
                         continue
 
+                    candidate_category = (
+                        self._extract_category(
+                            candidate.url
+                        )
+                    )
+
+                    if primary_category is None:
+                        primary_category = candidate_category
+
+                    if (
+                        candidate_category
+                        != primary_category
+                    ):
+                        continue
+
                     used_keys.add(candidate.key)
                     candidates.append(candidate)
                     added_on_page += 1
@@ -116,14 +133,33 @@ class OnlinerSource:
                             candidates
                         )
 
-                # Защита на случай, если API игнорирует page
-                # и возвращает одну и ту же страницу.
                 if added_on_page == 0:
+                    pages_without_primary_products += 1
+                else:
+                    pages_without_primary_products = 0
+
+                # Поиск Onliner после основных товаров может
+                # продолжаться аксессуарами других категорий.
+                # Две страницы без основной категории означают,
+                # что релевантная часть выдачи закончилась.
+                if pages_without_primary_products >= 2:
                     break
 
                 page += 1
 
         return self._group_variants(candidates)
+
+    @staticmethod
+    def _extract_category(product_url: str) -> str:
+        """Получает раздел каталога из URL товара."""
+
+        path_parts = [
+            part
+            for part in urlparse(product_url).path.split("/")
+            if part
+        ]
+
+        return path_parts[0] if path_parts else ""
 
     @staticmethod
     def _group_variants(
