@@ -353,6 +353,40 @@ class PriceService:
         canonical = normalize(canonical_title)
         candidate = normalize(candidate_title)
 
+        accessory_markers = {
+            "adapter",
+            "case",
+            "cable",
+            "charger",
+            "cover",
+            "mount",
+            "protector",
+            "strap",
+            "адаптер",
+            "держател",
+            "зарядн",
+            "кабел",
+            "креплен",
+            "накладк",
+            "пленк",
+            "ремеш",
+            "стекл",
+            "чехол",
+        }
+
+        def is_accessory(value: str) -> bool:
+            return any(
+                token.startswith(marker)
+                for token in value.split()
+                for marker in accessory_markers
+            )
+
+        if (
+            is_accessory(candidate)
+            and not is_accessory(canonical)
+        ):
+            return False
+
         def model_codes(
             original_value: str,
             normalized_value: str,
@@ -366,6 +400,10 @@ class PriceService:
                     len(token) >= 4
                     and re.search(r"[a-zа-я]", token)
                     and re.search(r"\d", token)
+                    and not re.fullmatch(
+                        r"\d+(?:gb|tb|mb|гб|тб|мб)",
+                        token,
+                    )
                 )
             }
 
