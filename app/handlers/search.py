@@ -20,6 +20,12 @@ from app.models.search_result import (
     SourceSearchStatus,
 )
 from app.services.price_service import PriceService
+from app.services.product_variants import (
+    ProductVariantGroup,
+    extract_color,
+    group_by_memory,
+    group_product_variants,
+)
 from app.sources import (
     InvalidProductUrlError,
     ProductNotFoundError,
@@ -281,12 +287,23 @@ async def handle_product_selection(
     if callback.message is None:
         return
 
-    callback_data = callback.data or ""
-    product_key = callback_data.removeprefix(
+    product_key = (callback.data or "").removeprefix(
         "ol:"
     )
 
-    await callback.message.edit_text(
+    await load_product_comparison(
+        message=callback.message,
+        product_key=product_key,
+    )
+
+
+async def load_product_comparison(
+    message: Message,
+    product_key: str,
+) -> None:
+    """Загружает сравнение выбранной модификации."""
+
+    await message.edit_text(
         "🔎 Сравниваю цены Onliner, "
         "21vek и 5 элемента..."
     )
@@ -299,7 +316,7 @@ async def handle_product_selection(
             )
         )
     except ProductNotFoundError as error:
-        await callback.message.edit_text(
+        await message.edit_text(
             f"Предложения не найдены.\n\n{error}"
         )
         return
@@ -309,7 +326,7 @@ async def handle_product_selection(
             error,
         )
 
-        await callback.message.edit_text(
+        await message.edit_text(
             "Не удалось получить данные "
             "для выбранной модели.\n"
             "Попробуй повторить запрос."
@@ -320,13 +337,13 @@ async def handle_product_selection(
             "Unexpected product selection error"
         )
 
-        await callback.message.edit_text(
+        await message.edit_text(
             "Произошла непредвиденная ошибка."
         )
         return
 
     await show_comparison(
-        message=callback.message,
+        message=message,
         offers=comparison.offers,
         source_statuses=(
             comparison.source_statuses
@@ -367,18 +384,130 @@ async def handle_product_page(
     except ValueError:
         return
 
-    max_page = (len(products) - 1) // PRODUCT_PAGE_SIZE
+    groups = group_product_variants(products)
+    max_page = (len(groups) - 1) // PRODUCT_PAGE_SIZE
     page = min(max(page, 0), max_page)
 
     await callback.message.edit_text(
         format_product_page_text(
-            total=len(products),
+            total=len(groups),
             page=page,
         ),
         reply_markup=build_product_keyboard(
             products=products,
             search_id=search_id,
             page=page,
+        ),
+    )
+
+
+@router.callback_query(
+    F.data.startswith("olg:")
+)
+async def handle_variant_group(
+    callback: CallbackQuery,
+) -> None:
+    """Показывает память выбранной модели."""
+
+    await callback.answer()
+
+    if callback.message is None:
+        return
+
+    parts = (callback.data or "").split(":")
+
+    if len(parts) != 3:
+        return
+
+    _, search_id, raw_group_index = parts
+    products = product_searches.get(search_id)
+
+    if products is None:
+        await callback.message.edit_text(
+            "Результаты поиска устарели. "
+            "Повтори запрос."
+        )
+        return
+
+    try:
+        group_index = int(raw_group_index)
+        group = group_product_variants(products)[
+            group_index
+        ]
+    except (ValueError, IndexError):
+        return
+
+    memory_groups = group_by_memory(group.products)
+
+    if len(memory_groups) == 1:
+        await show_color_selection(
+            message=callback.message,
+            group=group,
+            products=memory_groups[0][1],
+            back_callback=(
+                f"olp:{search_id}:"
+                f"{group_index // PRODUCT_PAGE_SIZE}"
+            ),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"📱 {group.title}\n\n"
+        "Выбери объём памяти:",
+        reply_markup=build_memory_keyboard(
+            search_id=search_id,
+            group_index=group_index,
+            memory_groups=memory_groups,
+        ),
+    )
+
+
+@router.callback_query(
+    F.data.startswith("olm:")
+)
+async def handle_memory_selection(
+    callback: CallbackQuery,
+) -> None:
+    """Показывает цвета выбранной памяти."""
+
+    await callback.answer()
+
+    if callback.message is None:
+        return
+
+    parts = (callback.data or "").split(":")
+
+    if len(parts) != 4:
+        return
+
+    _, search_id, raw_group_index, raw_memory_index = parts
+    products = product_searches.get(search_id)
+
+    if products is None:
+        await callback.message.edit_text(
+            "Результаты поиска устарели. "
+            "Повтори запрос."
+        )
+        return
+
+    try:
+        group_index = int(raw_group_index)
+        memory_index = int(raw_memory_index)
+        group = group_product_variants(products)[
+            group_index
+        ]
+        memory_products = group_by_memory(
+            group.products
+        )[memory_index][1]
+    except (ValueError, IndexError):
+        return
+
+    await show_color_selection(
+        message=callback.message,
+        group=group,
+        products=memory_products,
+        back_callback=(
+            f"olg:{search_id}:{group_index}"
         ),
     )
 
@@ -662,6 +791,7 @@ async def handle_search(
         return
 
     search_id = store_product_search(products)
+    groups = group_product_variants(products)
     keyboard = build_product_keyboard(
         products=products,
         search_id=search_id,
@@ -670,7 +800,7 @@ async def handle_search(
 
     await status_message.edit_text(
         format_product_page_text(
-            total=len(products),
+            total=len(groups),
             page=0,
         ),
         reply_markup=keyboard,
@@ -685,21 +815,34 @@ def build_product_keyboard(
     """Создаёт страницу кнопок выбора товара."""
 
     builder = InlineKeyboardBuilder()
+    groups = group_product_variants(products)
     start = page * PRODUCT_PAGE_SIZE
     end = start + PRODUCT_PAGE_SIZE
 
-    for product in products[start:end]:
-        button_text = product.title
+    for group_index, group in enumerate(
+        groups[start:end],
+        start=start,
+    ):
+        button_text = group.title
 
         if len(button_text) > 58:
             button_text = (
                 button_text[:55] + "..."
             )
 
+        if len(group.products) == 1:
+            callback_data = (
+                f"ol:{group.products[0].key}"
+            )
+        else:
+            callback_data = (
+                f"olg:{search_id}:{group_index}"
+            )
+
         builder.row(
             InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"ol:{product.key}",
+                callback_data=callback_data,
             )
         )
 
@@ -721,7 +864,7 @@ def build_product_keyboard(
             )
         )
 
-    if end < len(products):
+    if end < len(groups):
         navigation.append(
             InlineKeyboardButton(
                 text="Далее ➡️",
@@ -735,6 +878,98 @@ def build_product_keyboard(
         builder.row(*navigation)
 
     return builder.as_markup()
+
+
+def build_memory_keyboard(
+    search_id: str,
+    group_index: int,
+    memory_groups: list[
+        tuple[str, list[ProductCandidate]]
+    ],
+) -> InlineKeyboardMarkup:
+    """Создаёт кнопки конфигураций памяти."""
+
+    builder = InlineKeyboardBuilder()
+
+    for memory_index, (label, _) in enumerate(
+        memory_groups
+    ):
+        builder.row(
+            InlineKeyboardButton(
+                text=label,
+                callback_data=(
+                    f"olm:{search_id}:{group_index}:"
+                    f"{memory_index}"
+                ),
+            )
+        )
+
+    builder.row(
+        InlineKeyboardButton(
+            text="⬅️ К моделям",
+            callback_data=(
+                f"olp:{search_id}:"
+                f"{group_index // PRODUCT_PAGE_SIZE}"
+            ),
+        )
+    )
+
+    return builder.as_markup()
+
+
+async def show_color_selection(
+    message: Message,
+    group: ProductVariantGroup,
+    products: list[ProductCandidate],
+    back_callback: str,
+) -> None:
+    """Показывает цвета или сразу открывает товар."""
+
+    if len(products) == 1:
+        await load_product_comparison(
+            message=message,
+            product_key=products[0].key,
+        )
+        return
+
+    builder = InlineKeyboardBuilder()
+    used_labels: set[str] = set()
+
+    for product in products:
+        label = extract_color(product.title)
+
+        if label is None:
+            label = product.title
+
+        normalized_label = label.casefold()
+
+        if normalized_label in used_labels:
+            continue
+
+        used_labels.add(normalized_label)
+        builder.row(
+            InlineKeyboardButton(
+                text=(
+                    label
+                    if len(label) <= 58
+                    else label[:55] + "..."
+                ),
+                callback_data=f"ol:{product.key}",
+            )
+        )
+
+    builder.row(
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data=back_callback,
+        )
+    )
+
+    await message.edit_text(
+        f"📱 {group.title}\n\n"
+        "Выбери цвет или вариант:",
+        reply_markup=builder.as_markup(),
+    )
 
 
 def store_product_search(
