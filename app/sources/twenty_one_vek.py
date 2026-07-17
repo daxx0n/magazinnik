@@ -47,6 +47,168 @@ class TwentyOneVekSource:
         pool=20.0,
     )
 
+    _search_url = "https://www.21vek.by/search/"
+
+    async def find_offers(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> list[ProductOffer]:
+        """Ищет доступные товары 21vek по названию."""
+
+        normalized_query = " ".join(
+            query.strip().split()
+        )
+
+        if len(normalized_query) < 3:
+            return []
+
+        try:
+            async with httpx.AsyncClient(
+                headers=self._headers,
+                timeout=self._timeout,
+                follow_redirects=True,
+            ) as client:
+                response = await client.get(
+                    self._search_url,
+                    params={
+                        "term": normalized_query,
+                    },
+                )
+
+            response.raise_for_status()
+
+        except httpx.TimeoutException as error:
+            raise SourceUnavailableError(
+                "Поиск 21vek не ответил вовремя."
+            ) from error
+
+        except httpx.HTTPStatusError as error:
+            raise SourceUnavailableError(
+                "Поиск 21vek вернул HTTP-ошибку "
+                f"{error.response.status_code}."
+            ) from error
+
+        except httpx.RequestError as error:
+            raise SourceUnavailableError(
+                "Не удалось подключиться "
+                "к поиску 21vek."
+            ) from error
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
+
+        next_data_element = soup.find(
+            "script",
+            id="__NEXT_DATA__",
+        )
+
+        if next_data_element is None:
+            raise SourceUnavailableError(
+                "21vek вернул страницу поиска "
+                "в неожиданном формате."
+            )
+
+        raw_next_data = (
+            next_data_element.string
+            or next_data_element.get_text()
+        )
+
+        try:
+            next_data = json.loads(raw_next_data)
+            raw_initial_state = (
+                next_data["props"]
+                ["pageProps"]
+                ["initialState"]
+            )
+            initial_state = json.loads(
+                raw_initial_state
+            )
+            raw_products = (
+                initial_state["searchResult"]
+                ["products"]
+                ["all"]
+            )
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+        ) as error:
+            raise SourceUnavailableError(
+                "21vek вернул некорректные "
+                "данные поиска."
+            ) from error
+
+        if not isinstance(raw_products, list):
+            return []
+
+        offers: list[ProductOffer] = []
+
+        for raw_product in raw_products:
+            offer = self._offer_from_search_result(
+                raw_product
+            )
+
+            if offer is None:
+                continue
+
+            offers.append(offer)
+
+            if len(offers) >= limit:
+                break
+
+        return offers
+
+    def _offer_from_search_result(
+        self,
+        raw_product: object,
+    ) -> ProductOffer | None:
+        """Преобразует результат поиска в предложение."""
+
+        if not isinstance(raw_product, dict):
+            return None
+
+        if raw_product.get("status") != "in":
+            return None
+
+        title = raw_product.get("name")
+        link = raw_product.get("link")
+
+        if not isinstance(title, str) or not title:
+            return None
+
+        if (
+            not isinstance(link, str)
+            or not link.startswith("/")
+        ):
+            return None
+
+        price = self._parse_price(
+            raw_product.get("salePrice")
+            or raw_product.get("packPrice")
+            or raw_product.get("price")
+        )
+
+        if price is None or price <= 0:
+            return None
+
+        return ProductOffer(
+            source=self.source_name,
+            title=title.strip(),
+            price=float(price),
+            currency="BYN",
+            available=True,
+            url=f"https://www.21vek.by{link}",
+            seller="21vek",
+            availability_text="В наличии",
+            delivery_text=None,
+            updated_at=datetime.now().strftime(
+                "%d.%m.%Y %H:%M"
+            ),
+        )
+
     async def search(
         self,
         query: str,

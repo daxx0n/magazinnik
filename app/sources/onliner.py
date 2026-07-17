@@ -488,6 +488,20 @@ class OnlinerSource:
             if not isinstance(seller, str):
                 seller = f"Магазин #{shop_id}"
 
+            seller_url = shop.get("html_url")
+
+            if not isinstance(seller_url, str):
+                seller_url = (
+                    product_url.rstrip("/")
+                    + "/prices"
+                )
+
+            seller_url = seller_url.replace(
+                "http://",
+                "https://",
+                1,
+            )
+
             availability_text = (
                 self._get_availability_text(
                     position
@@ -505,10 +519,7 @@ class OnlinerSource:
                     price=float(price),
                     currency="BYN",
                     available=available,
-                    url=(
-                        product_url.rstrip("/")
-                        + "/prices"
-                    ),
+                    url=seller_url,
                     seller=seller,
                     availability_text=(
                         availability_text

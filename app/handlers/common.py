@@ -27,7 +27,8 @@ async def handle_help(message: Message) -> None:
 
     await message.answer(
         "Как пользоваться ботом:\n\n"
-        "🔎 Поиск Onliner:\n"
+        "🔎 Сравнение цен в Onliner, "
+        "21vek и 5 элементе:\n"
         "Просто отправь название товара.\n\n"
         "Прямая ссылка Onliner:\n"
         "/onliner ССЫЛКА\n\n"
@@ -35,10 +36,10 @@ async def handle_help(message: Message) -> None:
         "/twentyone ССЫЛКА\n\n"
         "Прямая ссылка 5 элемента:\n"
         "/five ССЫЛКА\n\n"
+        "🔎 Поиск в 5 элементе:\n"
+        "/five_search НАЗВАНИЕ\n\n"
         "Сравнение Onliner и 5 элемента:\n"
         "/compare "
         "ССЫЛКА_ONLINER "
-        "ССЫЛКА_5ELEMENT\n\n"
-        "⚠️ Автоматический поиск "
-        "5 элемента временно отключён."
+        "ССЫЛКА_5ELEMENT"
     )

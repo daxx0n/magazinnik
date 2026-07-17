@@ -274,12 +274,14 @@ async def handle_product_selection(
     )
 
     await callback.message.edit_text(
-        "🔎 Получаю предложения продавцов..."
+        "🔎 Сравниваю цены Onliner, "
+        "21vek и 5 элемента..."
     )
 
     try:
         offers = (
-            await price_service.search_onliner_key(
+            await price_service
+            .search_all_sources_by_onliner_key(
                 product_key
             )
         )
@@ -290,12 +292,13 @@ async def handle_product_selection(
         return
     except SourceUnavailableError as error:
         logger.warning(
-            "Onliner unavailable: %s",
+            "Aggregate search unavailable: %s",
             error,
         )
 
         await callback.message.edit_text(
-            "Onliner временно недоступен.\n"
+            "Не удалось получить данные "
+            "для выбранной модели.\n"
             "Попробуй повторить запрос."
         )
         return
@@ -309,7 +312,7 @@ async def handle_product_selection(
         )
         return
 
-    await show_offers(
+    await show_comparison(
         message=callback.message,
         offers=offers,
     )
@@ -351,7 +354,7 @@ async def handle_five_element_search(
 
     except SourceUnavailableError as error:
         logger.warning(
-            "5element index unavailable: %s",
+            "5element search unavailable: %s",
             error,
         )
 
@@ -363,7 +366,7 @@ async def handle_five_element_search(
 
     except Exception:
         logger.exception(
-            "Unexpected 5element index error"
+            "Unexpected 5element search error"
         )
 
         await status_message.edit_text(
