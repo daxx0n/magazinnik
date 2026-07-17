@@ -708,6 +708,12 @@ def build_product_keyboard(
     if page > 0:
         navigation.append(
             InlineKeyboardButton(
+                text="⏮ В начало",
+                callback_data=f"olp:{search_id}:0",
+            )
+        )
+        navigation.append(
+            InlineKeyboardButton(
                 text="⬅️ Назад",
                 callback_data=(
                     f"olp:{search_id}:{page - 1}"
