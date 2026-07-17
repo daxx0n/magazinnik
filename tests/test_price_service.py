@@ -4,6 +4,14 @@ from app.services.price_service import PriceService
 
 
 class ModelMatchingTest(unittest.TestCase):
+    def test_builds_query_without_color(self) -> None:
+        self.assertEqual(
+            PriceService._build_cross_source_query(
+                "Apple iPhone 17 512GB (черный)"
+            ),
+            "Apple iPhone 17 512GB",
+        )
+
     def test_explains_mismatch_reason(self) -> None:
         cases = [
             (
@@ -40,6 +48,11 @@ class ModelMatchingTest(unittest.TestCase):
                 "DeLonghi ECAM 22.110.B",
                 "DeLonghi ECAM 22.114.B",
                 "model_code",
+            ),
+            (
+                "Apple iPhone 17 512GB (черный)",
+                "Apple iPhone 17 512GB White",
+                "color",
             ),
         ]
 
