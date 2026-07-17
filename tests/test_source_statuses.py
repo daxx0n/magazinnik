@@ -44,6 +44,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             return_value=(
                 [make_offer("5 элемент", canonical, 3000)],
                 True,
+                [],
             )
         )
         service._twenty_one_vek_source.find_offers = AsyncMock(
@@ -73,8 +74,11 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 make_offer("Onliner", canonical, 1550),
             ]
         )
+        service._onliner_queries["bosch-hba534eb3"] = (
+            "Bosch HBA534EB3"
+        )
         service._search_five_element_by_query = AsyncMock(
-            return_value=([], True)
+            return_value=([], True, [])
         )
         service._twenty_one_vek_source.find_offers = AsyncMock(
             return_value=[]
@@ -93,6 +97,10 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [status.state for status in result.source_statuses],
             ["found", "filtered", "not_found"],
+        )
+        service._search_five_element_by_query.assert_awaited_once_with(
+            query="Bosch HBA534EB3",
+            canonical_title=canonical,
         )
 
     def test_formats_all_status_variants(self) -> None:
