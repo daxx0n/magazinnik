@@ -182,6 +182,51 @@ class ModelMatchingTest(unittest.TestCase):
                     )
                 )
 
+    def test_uses_user_query_for_cross_source_codes(self) -> None:
+        cases = [
+            (
+                "Samsung Galaxy S24 Ultra SM-S928B 256GB",
+                "Samsung Galaxy S24 Ultra 12GB/256GB",
+                "Samsung Galaxy S24 Ultra 256GB",
+                None,
+            ),
+            (
+                "Apple MacBook Air 13 M3 2024 MC8K4",
+                "Apple MacBook Air 15 M3 2024 256GB MRYR3",
+                "Apple MacBook Air M3 256GB",
+                "model_number",
+            ),
+            (
+                "Apple MacBook Air 13 M3 2024 MC8K4",
+                "Apple MacBook Air 13 M4 2024 256GB MW0Y3",
+                "Apple MacBook Air M3 256GB",
+                "model_number",
+            ),
+            (
+                "Xiaomi Redmi Note 13 Pro 4G 8GB/256GB",
+                "Xiaomi Redmi Note 15 Pro 8GB/256GB",
+                "Xiaomi Redmi Note 13 Pro 256GB",
+                "model_number",
+            ),
+            (
+                "DeLonghi Magnifica S ECAM 22.110.B",
+                "DeLonghi Magnifica S ECAM22.110.B",
+                "DeLonghi ECAM 22.110.B",
+                None,
+            ),
+        ]
+
+        for canonical, candidate, requested, expected in cases:
+            with self.subTest(requested=requested):
+                self.assertEqual(
+                    PriceService._model_mismatch_reason(
+                        canonical,
+                        candidate,
+                        requested_title=requested,
+                    ),
+                    expected,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
