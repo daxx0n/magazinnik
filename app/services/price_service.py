@@ -9,6 +9,9 @@ from app.sources.five_element import (
     FiveElementSource,
 )
 from app.sources.onliner import OnlinerSource
+from app.sources.twenty_one_vek import (
+    TwentyOneVekSource,
+)
 
 
 class PriceService:
@@ -23,6 +26,9 @@ class PriceService:
 
         self._five_element_index = (
             FiveElementIndex()
+        )
+        self._twenty_one_vek_source = (
+            TwentyOneVekSource()
         )
 
     async def find_onliner_products(
@@ -105,6 +111,23 @@ class PriceService:
             limit=1,
         )
 
+    async def search_twenty_one_vek_url(
+        self,
+        url: str,
+    ) -> list[ProductOffer]:
+        """Получает товар из 21vek."""
+
+        offers = (
+            await self
+            ._twenty_one_vek_source
+            .search(url)
+        )
+
+        return self._prepare_offers(
+            offers=offers,
+            limit=1,
+        )
+    
     async def search_five_element_key(
         self,
         product_key: str,

@@ -457,6 +457,83 @@ async def handle_five_element_selection(
         offers=offers,
     )
 
+@router.message(Command("twentyone"))
+async def handle_twenty_one_vek_url(
+    message: Message,
+) -> None:
+    """Обрабатывает ссылку 21vek.by."""
+
+    command_text = message.text or ""
+
+    command_parts = command_text.split(
+        maxsplit=1
+    )
+
+    if len(command_parts) < 2:
+        await message.answer(
+            "После команды отправь ссылку "
+            "на товар 21vek.\n\n"
+            "Пример:\n"
+            "/twentyone "
+            "https://www.21vek.by/mobile/"
+            "iphone17256gb_apple_10019135.html"
+        )
+        return
+
+    product_url = command_parts[1].strip()
+
+    status_message = await message.answer(
+        "🔎 Получаю цену из 21vek..."
+    )
+
+    try:
+        offers = (
+            await price_service
+            .search_twenty_one_vek_url(
+                product_url
+            )
+        )
+
+    except InvalidProductUrlError as error:
+        await status_message.edit_text(
+            f"Некорректная ссылка.\n\n{error}"
+        )
+        return
+
+    except ProductNotFoundError as error:
+        await status_message.edit_text(
+            f"Товар не найден.\n\n{error}"
+        )
+        return
+
+    except SourceUnavailableError as error:
+        logger.warning(
+            "21vek unavailable: %s",
+            error,
+        )
+
+        await status_message.edit_text(
+            "21vek временно недоступен."
+        )
+        return
+
+    except Exception:
+        logger.exception(
+            "Unexpected 21vek error"
+        )
+
+        await status_message.edit_text(
+            "Произошла ошибка при получении "
+            "данных из 21vek."
+        )
+        return
+
+    await show_offers(
+        message=status_message,
+        offers=offers,
+    )
+
+
 @router.message(F.text)
 async def handle_search(
     message: Message,
