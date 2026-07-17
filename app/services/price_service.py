@@ -53,7 +53,7 @@ class PriceService:
             ._onliner_source
             .find_products(
                 query=query,
-                limit=5,
+                limit=None,
             )
         )
 
@@ -302,7 +302,6 @@ class PriceService:
 
         offers = self._prepare_aggregate_offers(
             offers=combined_offers,
-            limit=5,
         )
 
         return ComparisonResult(
@@ -451,9 +450,8 @@ class PriceService:
     def _prepare_aggregate_offers(
         cls,
         offers: list[ProductOffer],
-        limit: int,
     ) -> list[ProductOffer]:
-        """Формирует топ с представителем каждого источника."""
+        """Оставляет минимальную цену каждого источника."""
 
         sorted_offers = cls._prepare_offers(
             offers=offers,
@@ -461,7 +459,6 @@ class PriceService:
         )
 
         selected: list[ProductOffer] = []
-        selected_ids: set[int] = set()
         represented_sources: set[str] = set()
 
         for offer in sorted_offers:
@@ -469,23 +466,9 @@ class PriceService:
                 continue
 
             selected.append(offer)
-            selected_ids.add(id(offer))
             represented_sources.add(offer.source)
 
-        for offer in sorted_offers:
-            if len(selected) >= limit:
-                break
-
-            if id(offer) in selected_ids:
-                continue
-
-            selected.append(offer)
-            selected_ids.add(id(offer))
-
-        return sorted(
-            selected[:limit],
-            key=lambda offer: offer.price,
-        )
+        return selected
 
     @classmethod
     def _matches_model(
