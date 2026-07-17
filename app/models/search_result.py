@@ -1,0 +1,20 @@
+from dataclasses import dataclass
+
+from app.models.offer import ProductOffer
+
+
+@dataclass(frozen=True, slots=True)
+class SourceSearchStatus:
+    """Итог проверки одного источника."""
+
+    source: str
+    state: str
+    matched_offers: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ComparisonResult:
+    """Предложения и отчёт по проверенным источникам."""
+
+    offers: list[ProductOffer]
+    source_statuses: list[SourceSearchStatus]
