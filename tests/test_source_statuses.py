@@ -29,6 +29,93 @@ def make_offer(
 
 
 class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
+    async def test_searches_five_element_with_color_variants(self) -> None:
+        service = PriceService()
+        canonical = "Apple iPhone 17 512GB (черный)"
+        candidate = ProductCandidate(
+            key="iphone-17-black",
+            title="Apple iPhone 17 512GB Black",
+            url="https://5element.by/products/iphone-17-black",
+        )
+        offer = make_offer("5 элемент", candidate.title, 3500)
+        service._five_element_source.find_products = AsyncMock(
+            side_effect=[[], [candidate], []]
+        )
+        service.search_five_element_key = AsyncMock(
+            return_value=[offer]
+        )
+
+        offers, had_candidates, _ = (
+            await service._search_five_element_by_query(
+                query="Apple iPhone 17 512GB",
+                canonical_title=canonical,
+                requested_title="iPhone",
+            )
+        )
+
+        self.assertEqual(offers, [offer])
+        self.assertTrue(had_candidates)
+        self.assertEqual(
+            [
+                call.kwargs
+                for call in service._five_element_source
+                .find_products.await_args_list
+            ],
+            [
+                {
+                    "query": "Apple iPhone 17 512GB черный",
+                    "limit": 100,
+                },
+                {
+                    "query": "Apple iPhone 17 512GB black",
+                    "limit": 100,
+                },
+                {
+                    "query": "Apple iPhone 17 512GB",
+                    "limit": 100,
+                },
+            ],
+        )
+
+    async def test_searches_twenty_one_vek_with_color_variants(self) -> None:
+        service = PriceService()
+        offer = make_offer(
+            "21vek",
+            "Apple iPhone 17 512GB черный",
+            3600,
+        )
+        service._twenty_one_vek_source.find_offers = AsyncMock(
+            side_effect=[[offer], [], [offer]]
+        )
+
+        offers = await service._search_twenty_one_vek_by_query(
+            query="Apple iPhone 17 512GB",
+            canonical_title="Apple iPhone 17 512GB (черный)",
+        )
+
+        self.assertEqual(offers, [offer])
+        self.assertEqual(
+            [
+                call.kwargs
+                for call in service._twenty_one_vek_source
+                .find_offers.await_args_list
+            ],
+            [
+                {
+                    "query": "Apple iPhone 17 512GB черный",
+                    "limit": 100,
+                },
+                {
+                    "query": "Apple iPhone 17 512GB black",
+                    "limit": 100,
+                },
+                {
+                    "query": "Apple iPhone 17 512GB",
+                    "limit": 100,
+                },
+            ],
+        )
+
     def test_keeps_only_cheapest_offer_per_source(self) -> None:
         offers = [
             make_offer("Onliner", "Model", 1200),
