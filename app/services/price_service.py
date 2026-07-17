@@ -8,6 +8,7 @@ from app.models.search_result import (
     ComparisonResult,
     SourceSearchStatus,
 )
+from app.sources import ProductNotFoundError
 from app.sources.five_element import (
     FiveElementSource,
 )
@@ -24,6 +25,11 @@ class PriceService:
     """Сервис поиска и сравнения цен."""
 
     def __init__(self) -> None:
+        self._onliner_candidates: dict[
+            str,
+            ProductCandidate,
+        ] = {}
+
         self._onliner_source = OnlinerSource()
 
         self._five_element_source = (
@@ -40,7 +46,7 @@ class PriceService:
     ) -> list[ProductCandidate]:
         """Ищет карточки Onliner."""
 
-        return (
+        products = (
             await self
             ._onliner_source
             .find_products(
@@ -48,6 +54,11 @@ class PriceService:
                 limit=5,
             )
         )
+
+        for product in products:
+            self._onliner_candidates[product.key] = product
+
+        return products
 
     async def find_five_element_products(
         self,
@@ -136,24 +147,30 @@ class PriceService:
     ) -> ComparisonResult:
         """Собирает общий топ цен для выбранной модели."""
 
-        onliner_offers = (
-            await self.search_onliner_key(
-                product_key
-            )
+        selected_candidate = (
+            self._onliner_candidates.get(product_key)
         )
 
-        if not onliner_offers:
-            return ComparisonResult(
-                offers=[],
-                source_statuses=[
-                    SourceSearchStatus(
-                        source="Onliner",
-                        state="not_found",
-                    )
-                ],
+        try:
+            onliner_offers = (
+                await self.search_onliner_key(
+                    product_key
+                )
             )
+        except ProductNotFoundError:
+            if selected_candidate is None:
+                raise
 
-        canonical_title = onliner_offers[0].title
+            onliner_offers = []
+
+        if onliner_offers:
+            canonical_title = onliner_offers[0].title
+        elif selected_candidate is not None:
+            canonical_title = selected_candidate.title
+        else:
+            raise ProductNotFoundError(
+                "Не удалось определить выбранную модель."
+            )
         cross_source_query = (
             self._build_cross_source_query(
                 canonical_title
@@ -184,7 +201,11 @@ class PriceService:
         source_statuses = [
             SourceSearchStatus(
                 source="Onliner",
-                state="found",
+                state=(
+                    "found"
+                    if onliner_offers
+                    else "not_found"
+                ),
                 matched_offers=len(onliner_offers),
             )
         ]
@@ -449,6 +470,52 @@ class PriceService:
         canonical = normalize(canonical_title)
         candidate = normalize(candidate_title)
 
+        canonical_tokens = canonical.split()
+        candidate_tokens = set(candidate.split())
+
+        generic_title_words = {
+            "headphones",
+            "laptop",
+            "phone",
+            "smartphone",
+            "tv",
+            "беспроводные",
+            "духовой",
+            "игровая",
+            "кофемашина",
+            "наушники",
+            "ноутбук",
+            "пылесос",
+            "приставка",
+            "робот",
+            "смартфон",
+            "телевизор",
+            "телефон",
+            "холодильник",
+            "шкаф",
+            "электрический",
+        }
+
+        canonical_brand = next(
+            (
+                token
+                for token in canonical_tokens
+                if (
+                    token.isalpha()
+                    and token
+                    not in generic_title_words
+                )
+            ),
+            None,
+        )
+
+        if (
+            canonical_brand
+            and canonical_brand
+            not in candidate_tokens
+        ):
+            return "brand"
+
         accessory_markers = {
             "adapter",
             "case",
@@ -511,7 +578,7 @@ class PriceService:
             # должны считаться одним кодом.
             for raw_code in re.findall(
                 r"[a-zа-я0-9]+"
-                r"(?:[-_/][a-zа-я0-9]+)+",
+                r"(?:[-_/.][a-zа-я0-9]+)+",
                 original_value.casefold(),
             ):
                 compact_code = re.sub(
@@ -522,11 +589,22 @@ class PriceService:
 
                 if (
                     len(compact_code) >= 4
-                    and re.search(
-                        r"[a-zа-я]",
-                        compact_code,
+                    and (
+                        (
+                            re.search(
+                                r"[a-zа-я]",
+                                compact_code,
+                            )
+                            and re.search(
+                                r"\d",
+                                compact_code,
+                            )
+                        )
+                        or (
+                            compact_code.isdigit()
+                            and len(compact_code) >= 6
+                        )
                     )
-                    and re.search(r"\d", compact_code)
                 ):
                     codes.add(compact_code)
 
