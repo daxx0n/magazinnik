@@ -78,7 +78,11 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [button.text for button in rows[-1]],
-            ["⬅️ Назад", "Далее ➡️"],
+            [
+                "⏮ В начало",
+                "⬅️ Назад",
+                "Далее ➡️",
+            ],
         )
         self.assertEqual(
             format_product_page_text(23, 1),
