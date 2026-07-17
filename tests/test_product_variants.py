@@ -4,6 +4,7 @@ from app.models.product import ProductCandidate
 from app.services.product_variants import (
     base_product_title,
     extract_color,
+    extract_color_key,
     extract_memory,
     group_by_memory,
     group_product_variants,
@@ -42,6 +43,18 @@ class ProductVariantsTest(unittest.TestCase):
             extract_color(
                 "Apple AirPods Pro 2 (с разъемом USB-C)"
             )
+        )
+        self.assertEqual(
+            extract_color_key(
+                "Apple iPhone 17 512GB Black"
+            ),
+            "black",
+        )
+        self.assertEqual(
+            extract_color_key(
+                "Apple iPhone 17 512GB (черный)"
+            ),
+            "black",
         )
 
     def test_groups_model_memory_and_colors(self) -> None:
