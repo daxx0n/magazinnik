@@ -353,6 +353,30 @@ class PriceService:
         canonical = normalize(canonical_title)
         candidate = normalize(candidate_title)
 
+        def model_codes(value: str) -> set[str]:
+            """Находит цельные артикулы вроде HBA534EB3."""
+
+            return {
+                token
+                for token in value.split()
+                if (
+                    len(token) >= 4
+                    and re.search(r"[a-zа-я]", token)
+                    and re.search(r"\d", token)
+                )
+            }
+
+        canonical_model_codes = model_codes(canonical)
+        candidate_model_codes = model_codes(candidate)
+
+        if (
+            canonical_model_codes
+            and not canonical_model_codes.issubset(
+                candidate_model_codes
+            )
+        ):
+            return False
+
         memory_pattern = (
             r"\b(\d+)\s*"
             r"(gb|tb|mb|гб|тб|мб)\b"
@@ -412,8 +436,11 @@ class PriceService:
             re.findall(r"\d+", candidate)
         )
 
-        if not canonical_numbers.issubset(
-            candidate_numbers
+        if (
+            not canonical_model_codes
+            and not canonical_numbers.issubset(
+                candidate_numbers
+            )
         ):
             return False
 
