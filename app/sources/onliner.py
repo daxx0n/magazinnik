@@ -147,7 +147,14 @@ class OnlinerSource:
 
                 page += 1
 
-        return self._group_variants(candidates)
+        grouped_candidates = self._group_variants(
+            candidates
+        )
+
+        return self._sort_product_family(
+            candidates=grouped_candidates,
+            query=normalized_query,
+        )
 
     @staticmethod
     def _extract_category(product_url: str) -> str:
@@ -170,14 +177,10 @@ class OnlinerSource:
         groups: dict[str, list[ProductCandidate]] = {}
 
         for candidate in candidates:
-            base_title = re.sub(
-                r"\s*\([^()]*(?:цвет|черн|бел|син|"
-                r"голуб|зелен|желт|красн|фиолет|"
-                r"сирен|лилов|розов|оранж|графит|"
-                r"серебр|золот|титан)[^()]*\)\s*$",
-                "",
-                candidate.title,
-                flags=re.IGNORECASE,
+            base_title = (
+                OnlinerSource._base_variant_title(
+                    candidate.title
+                )
             )
             group_key = " ".join(
                 base_title.casefold().split()
@@ -191,6 +194,100 @@ class OnlinerSource:
             for group in groups.values()
             for candidate in group
         ]
+
+    @staticmethod
+    def _base_variant_title(title: str) -> str:
+        """Убирает цвет из конца названия варианта."""
+
+        return re.sub(
+            r"\s*\([^()]*(?:цвет|черн|бел|син|"
+            r"голуб|зелен|желт|красн|фиолет|"
+            r"сирен|лилов|розов|оранж|графит|"
+            r"серебр|золот|титан)[^()]*\)\s*$",
+            "",
+            title,
+            flags=re.IGNORECASE,
+        )
+
+    @staticmethod
+    def _sort_product_family(
+        candidates: list[ProductCandidate],
+        query: str,
+    ) -> list[ProductCandidate]:
+        """Сортирует поколения и версии известных семейств."""
+
+        if "iphone" not in query.casefold():
+            return candidates
+
+        generations = [
+            int(match.group(1))
+            for candidate in candidates
+            if (
+                match := re.search(
+                    r"\biphone\s+(\d{1,2})\b",
+                    candidate.title.casefold(),
+                )
+            )
+        ]
+        latest_generation = max(
+            generations,
+            default=-1,
+        )
+
+        def iphone_sort_key(
+            candidate: ProductCandidate,
+        ) -> tuple[int, int, int, str]:
+            title = candidate.title.casefold()
+            generation_match = re.search(
+                r"\biphone\s+(\d{1,2})\b",
+                title,
+            )
+            generation = (
+                int(generation_match.group(1))
+                if generation_match
+                else (
+                    latest_generation
+                    if re.search(
+                        r"\biphone\s+air\b",
+                        title,
+                    )
+                    else -1
+                )
+            )
+
+            if "pro max" in title:
+                version_rank = 2
+            elif re.search(r"\bpro\b", title):
+                version_rank = 1
+            elif re.search(r"\bplus\b", title):
+                version_rank = 3
+            elif re.search(r"\bair\b", title):
+                version_rank = 4
+            else:
+                version_rank = 0
+
+            sim_rank = (
+                1
+                if re.search(
+                    r"\bdual\s*sim\b",
+                    title,
+                )
+                else 0
+            )
+
+            return (
+                -generation,
+                version_rank,
+                sim_rank,
+                OnlinerSource._base_variant_title(
+                    title
+                ),
+            )
+
+        return sorted(
+            candidates,
+            key=iphone_sort_key,
+        )
 
     async def search(
         self,
