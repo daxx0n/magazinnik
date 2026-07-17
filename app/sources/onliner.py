@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
@@ -62,47 +63,98 @@ class OnlinerSource:
         if len(normalized_query) < 3:
             return []
 
-        async with self._create_client() as client:
-            data = await self._request_json(
-                client=client,
-                url=self._search_endpoint,
-                params={
-                    "query": normalized_query,
-                },
-            )
-
-        raw_products = data.get("products", [])
-
-        if not isinstance(raw_products, list):
-            return []
-
         candidates: list[ProductCandidate] = []
         used_keys: set[str] = set()
+        page = 1
 
-        for raw_product in raw_products:
-            if not isinstance(raw_product, dict):
-                continue
+        async with self._create_client() as client:
+            while page <= 100:
+                data = await self._request_json(
+                    client=client,
+                    url=self._search_endpoint,
+                    params={
+                        "query": normalized_query,
+                        "page": str(page),
+                    },
+                )
+                raw_products = data.get(
+                    "products",
+                    [],
+                )
 
-            candidate = self._parse_candidate(
-                raw_product
+                if (
+                    not isinstance(raw_products, list)
+                    or not raw_products
+                ):
+                    break
+
+                added_on_page = 0
+
+                for raw_product in raw_products:
+                    if not isinstance(raw_product, dict):
+                        continue
+
+                    candidate = self._parse_candidate(
+                        raw_product
+                    )
+
+                    if (
+                        candidate is None
+                        or candidate.key in used_keys
+                    ):
+                        continue
+
+                    used_keys.add(candidate.key)
+                    candidates.append(candidate)
+                    added_on_page += 1
+
+                    if (
+                        limit is not None
+                        and len(candidates) >= limit
+                    ):
+                        return self._group_variants(
+                            candidates
+                        )
+
+                # Защита на случай, если API игнорирует page
+                # и возвращает одну и ту же страницу.
+                if added_on_page == 0:
+                    break
+
+                page += 1
+
+        return self._group_variants(candidates)
+
+    @staticmethod
+    def _group_variants(
+        candidates: list[ProductCandidate],
+    ) -> list[ProductCandidate]:
+        """Ставит цвета одной модификации рядом."""
+
+        groups: dict[str, list[ProductCandidate]] = {}
+
+        for candidate in candidates:
+            base_title = re.sub(
+                r"\s*\([^()]*(?:цвет|черн|бел|син|"
+                r"голуб|зелен|желт|красн|фиолет|"
+                r"сирен|лилов|розов|оранж|графит|"
+                r"серебр|золот|титан)[^()]*\)\s*$",
+                "",
+                candidate.title,
+                flags=re.IGNORECASE,
+            )
+            group_key = " ".join(
+                base_title.casefold().split()
+            )
+            groups.setdefault(group_key, []).append(
+                candidate
             )
 
-            if candidate is None:
-                continue
-
-            if candidate.key in used_keys:
-                continue
-
-            used_keys.add(candidate.key)
-            candidates.append(candidate)
-
-            if (
-                limit is not None
-                and len(candidates) >= limit
-            ):
-                break
-
-        return candidates
+        return [
+            candidate
+            for group in groups.values()
+            for candidate in group
+        ]
 
     async def search(
         self,
