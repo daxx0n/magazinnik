@@ -353,12 +353,15 @@ class PriceService:
         canonical = normalize(canonical_title)
         candidate = normalize(candidate_title)
 
-        def model_codes(value: str) -> set[str]:
-            """Находит цельные артикулы вроде HBA534EB3."""
+        def model_codes(
+            original_value: str,
+            normalized_value: str,
+        ) -> set[str]:
+            """Извлекает произвольные буквенно-цифровые коды."""
 
-            return {
+            codes = {
                 token
-                for token in value.split()
+                for token in normalized_value.split()
                 if (
                     len(token) >= 4
                     and re.search(r"[a-zа-я]", token)
@@ -366,8 +369,43 @@ class PriceService:
                 )
             }
 
-        canonical_model_codes = model_codes(canonical)
-        candidate_model_codes = model_codes(candidate)
+            if codes:
+                return codes
+
+            # Некоторые магазины разделяют части одного артикула
+            # дефисами или слешами: HBA-534-EB3 и HBA534EB3
+            # должны считаться одним кодом.
+            for raw_code in re.findall(
+                r"[a-zа-я0-9]+"
+                r"(?:[-_/][a-zа-я0-9]+)+",
+                original_value.casefold(),
+            ):
+                compact_code = re.sub(
+                    r"[^a-zа-я0-9]",
+                    "",
+                    raw_code,
+                )
+
+                if (
+                    len(compact_code) >= 4
+                    and re.search(
+                        r"[a-zа-я]",
+                        compact_code,
+                    )
+                    and re.search(r"\d", compact_code)
+                ):
+                    codes.add(compact_code)
+
+            return codes
+
+        canonical_model_codes = model_codes(
+            canonical_title,
+            canonical,
+        )
+        candidate_model_codes = model_codes(
+            candidate_title,
+            candidate,
+        )
 
         if (
             canonical_model_codes
