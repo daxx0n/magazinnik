@@ -160,6 +160,12 @@ class PriceService:
             )
         )
 
+        logger.info(
+            "Aggregate search: model=%r query=%r",
+            canonical_title,
+            cross_source_query,
+        )
+
         five_result, twenty_one_result = (
             await asyncio.gather(
                 self._search_five_element_by_query(
@@ -205,14 +211,26 @@ class PriceService:
                 source_offers, had_candidates = result
             else:
                 had_candidates = bool(result)
-                source_offers = [
-                    offer
-                    for offer in result
-                    if self._matches_model(
-                        canonical_title,
-                        offer.title,
+                source_offers = []
+
+                for offer in result:
+                    mismatch_reason = (
+                        self._model_mismatch_reason(
+                            canonical_title,
+                            offer.title,
+                        )
                     )
-                ]
+                    logger.info(
+                        "Match decision: source=%s "
+                        "candidate=%r accepted=%s reason=%s",
+                        source_name,
+                        offer.title,
+                        mismatch_reason is None,
+                        mismatch_reason or "exact_match",
+                    )
+
+                    if mismatch_reason is None:
+                        source_offers.append(offer)
 
             combined_offers.extend(source_offers)
 
@@ -253,10 +271,21 @@ class PriceService:
         )
 
         for product in products:
-            if self._matches_model(
-                canonical_title,
+            mismatch_reason = (
+                self._model_mismatch_reason(
+                    canonical_title,
+                    product.title,
+                )
+            )
+            logger.info(
+                "Match decision: source=5 элемент "
+                "candidate=%r accepted=%s reason=%s",
                 product.title,
-            ):
+                mismatch_reason is None,
+                mismatch_reason or "exact_match",
+            )
+
+            if mismatch_reason is None:
                 return (
                     (
                         await self
@@ -388,12 +417,25 @@ class PriceService:
             key=lambda offer: offer.price,
         )
 
-    @staticmethod
+    @classmethod
     def _matches_model(
+        cls,
         canonical_title: str,
         candidate_title: str,
     ) -> bool:
         """Не смешивает базовую, Pro, Max и другие версии."""
+
+        return cls._model_mismatch_reason(
+            canonical_title,
+            candidate_title,
+        ) is None
+
+    @staticmethod
+    def _model_mismatch_reason(
+        canonical_title: str,
+        candidate_title: str,
+    ) -> str | None:
+        """Возвращает причину несовпадения моделей."""
 
         def normalize(value: str) -> str:
             normalized = value.casefold()
@@ -439,7 +481,7 @@ class PriceService:
             is_accessory(candidate)
             and not is_accessory(canonical)
         ):
-            return False
+            return "accessory"
 
         def model_codes(
             original_value: str,
@@ -505,7 +547,7 @@ class PriceService:
                 candidate_model_codes
             )
         ):
-            return False
+            return "model_code"
 
         memory_pattern = (
             r"\b(\d+)\s*"
@@ -545,7 +587,7 @@ class PriceService:
                 candidate_memory
             )
         ):
-            return False
+            return "memory"
 
         memory_amounts = {
             amount
@@ -572,7 +614,7 @@ class PriceService:
                 candidate_numbers
             )
         ):
-            return False
+            return "model_number"
 
         def version_tokens(value: str) -> set[str]:
             tokens = set(
@@ -594,7 +636,10 @@ class PriceService:
             }
             return tokens & markers
 
-        return (
+        if (
             version_tokens(canonical)
-            == version_tokens(candidate)
-        )
+            != version_tokens(candidate)
+        ):
+            return "version"
+
+        return None
