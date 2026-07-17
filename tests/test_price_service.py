@@ -4,6 +4,45 @@ from app.services.price_service import PriceService
 
 
 class ModelMatchingTest(unittest.TestCase):
+    def test_explains_mismatch_reason(self) -> None:
+        cases = [
+            (
+                "Смартфон Samsung SM-A556E",
+                "Чехол для Samsung SM-A556E",
+                "accessory",
+            ),
+            (
+                "Духовой шкаф Bosch HBA534EB3",
+                "Духовой шкаф Bosch HBA514BS3",
+                "model_code",
+            ),
+            (
+                "Apple iPhone 16 Pro 256GB",
+                "Apple iPhone 16 Pro 128GB",
+                "memory",
+            ),
+            (
+                "Apple MacBook Air M3",
+                "Apple MacBook Air M2",
+                "model_number",
+            ),
+            (
+                "Apple iPhone 16 Pro",
+                "Apple iPhone 16 Pro Max",
+                "version",
+            ),
+        ]
+
+        for canonical, candidate, reason in cases:
+            with self.subTest(reason=reason):
+                self.assertEqual(
+                    PriceService._model_mismatch_reason(
+                        canonical,
+                        candidate,
+                    ),
+                    reason,
+                )
+
     def test_rejects_different_model_codes(self) -> None:
         cases = [
             (
