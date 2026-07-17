@@ -1,9 +1,12 @@
 import logging
+import secrets
+from collections import OrderedDict
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
+    InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
 )
@@ -29,6 +32,13 @@ router = Router(name="search")
 price_service = PriceService()
 
 logger = logging.getLogger(__name__)
+
+PRODUCT_PAGE_SIZE = 10
+MAX_SEARCH_SESSIONS = 100
+product_searches: OrderedDict[
+    str,
+    list[ProductCandidate],
+] = OrderedDict()
 
 
 @router.message(Command("onliner"))
@@ -323,6 +333,55 @@ async def handle_product_selection(
         ),
     )
 
+
+@router.callback_query(
+    F.data.startswith("olp:")
+)
+async def handle_product_page(
+    callback: CallbackQuery,
+) -> None:
+    """Переключает страницу найденных моделей."""
+
+    await callback.answer()
+
+    if callback.message is None:
+        return
+
+    callback_parts = (callback.data or "").split(":")
+
+    if len(callback_parts) != 3:
+        return
+
+    _, search_id, raw_page = callback_parts
+    products = product_searches.get(search_id)
+
+    if products is None:
+        await callback.message.edit_text(
+            "Результаты поиска устарели. "
+            "Повтори запрос."
+        )
+        return
+
+    try:
+        page = int(raw_page)
+    except ValueError:
+        return
+
+    max_page = (len(products) - 1) // PRODUCT_PAGE_SIZE
+    page = min(max(page, 0), max_page)
+
+    await callback.message.edit_text(
+        format_product_page_text(
+            total=len(products),
+            page=page,
+        ),
+        reply_markup=build_product_keyboard(
+            products=products,
+            search_id=search_id,
+            page=page,
+        ),
+    )
+
 @router.message(Command("five_search"))
 async def handle_five_element_search(
     message: Message,
@@ -602,25 +661,34 @@ async def handle_search(
         )
         return
 
+    search_id = store_product_search(products)
     keyboard = build_product_keyboard(
-        products
+        products=products,
+        search_id=search_id,
+        page=0,
     )
 
     await status_message.edit_text(
-        "Нашёл несколько вариантов.\n\n"
-        "Выбери точную модель:",
+        format_product_page_text(
+            total=len(products),
+            page=0,
+        ),
         reply_markup=keyboard,
     )
 
 
 def build_product_keyboard(
     products: list[ProductCandidate],
+    search_id: str,
+    page: int,
 ) -> InlineKeyboardMarkup:
-    """Создаёт кнопки выбора товара."""
+    """Создаёт страницу кнопок выбора товара."""
 
     builder = InlineKeyboardBuilder()
+    start = page * PRODUCT_PAGE_SIZE
+    end = start + PRODUCT_PAGE_SIZE
 
-    for product in products:
+    for product in products[start:end]:
         button_text = product.title
 
         if len(button_text) > 58:
@@ -628,14 +696,73 @@ def build_product_keyboard(
                 button_text[:55] + "..."
             )
 
-        builder.button(
-            text=button_text,
-            callback_data=f"ol:{product.key}",
+        builder.row(
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"ol:{product.key}",
+            )
         )
 
-    builder.adjust(1)
+    navigation: list[InlineKeyboardButton] = []
+
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data=(
+                    f"olp:{search_id}:{page - 1}"
+                ),
+            )
+        )
+
+    if end < len(products):
+        navigation.append(
+            InlineKeyboardButton(
+                text="Далее ➡️",
+                callback_data=(
+                    f"olp:{search_id}:{page + 1}"
+                ),
+            )
+        )
+
+    if navigation:
+        builder.row(*navigation)
 
     return builder.as_markup()
+
+
+def store_product_search(
+    products: list[ProductCandidate],
+) -> str:
+    """Сохраняет результаты для пагинации."""
+
+    search_id = secrets.token_urlsafe(6)
+    product_searches[search_id] = products
+    product_searches.move_to_end(search_id)
+
+    while len(product_searches) > MAX_SEARCH_SESSIONS:
+        product_searches.popitem(last=False)
+
+    return search_id
+
+
+def format_product_page_text(
+    total: int,
+    page: int,
+) -> str:
+    """Показывает номер страницы модификаций."""
+
+    total_pages = max(
+        1,
+        (total + PRODUCT_PAGE_SIZE - 1)
+        // PRODUCT_PAGE_SIZE,
+    )
+
+    return (
+        f"Нашёл вариантов: {total}.\n"
+        f"Страница {page + 1} из {total_pages}.\n\n"
+        "Выбери точную модель:"
+    )
 
 
 async def show_offers(
@@ -738,6 +865,7 @@ async def show_comparison(
 
     lines = [
         "🏆 Сравнение цен",
+        f"Найдено предложений: {len(offers)}",
         "",
     ]
 
@@ -840,8 +968,7 @@ def format_source_status(
     if status.state == "found":
         return (
             f"✅ {status.source} — "
-            f"точных предложений: "
-            f"{status.matched_offers}"
+            "предложение найдено"
         )
 
     if status.state == "filtered":
