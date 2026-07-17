@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import SourceSearchStatus
-from app.handlers.search import format_source_status
+from app.handlers.search import (
+    build_product_keyboard,
+    format_product_page_text,
+    format_source_status,
+)
 from app.services.price_service import PriceService
 from app.sources import ProductNotFoundError
 
@@ -25,6 +29,64 @@ def make_offer(
 
 
 class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
+    def test_keeps_only_cheapest_offer_per_source(self) -> None:
+        offers = [
+            make_offer("Onliner", "Model", 1200),
+            make_offer("Onliner", "Model", 1100),
+            make_offer("5 элемент", "Model", 1300),
+            make_offer("21vek", "Model", 1250),
+        ]
+
+        result = PriceService._prepare_aggregate_offers(
+            offers
+        )
+
+        self.assertEqual(
+            [(offer.source, offer.price) for offer in result],
+            [
+                ("Onliner", 1100),
+                ("21vek", 1250),
+                ("5 элемент", 1300),
+            ],
+        )
+
+    def test_paginates_product_variants(self) -> None:
+        products = [
+            ProductCandidate(
+                key=f"model-{index}",
+                title=f"Model {index}",
+                url=f"https://example.com/{index}",
+            )
+            for index in range(23)
+        ]
+
+        keyboard = build_product_keyboard(
+            products=products,
+            search_id="search",
+            page=1,
+        )
+        rows = keyboard.inline_keyboard
+
+        self.assertEqual(len(rows), 11)
+        self.assertEqual(
+            rows[0][0].callback_data,
+            "ol:model-10",
+        )
+        self.assertEqual(
+            rows[9][0].callback_data,
+            "ol:model-19",
+        )
+        self.assertEqual(
+            [button.text for button in rows[-1]],
+            ["⬅️ Назад", "Далее ➡️"],
+        )
+        self.assertEqual(
+            format_product_page_text(23, 1),
+            "Нашёл вариантов: 23.\n"
+            "Страница 2 из 3.\n\n"
+            "Выбери точную модель:",
+        )
+
     async def test_continues_when_onliner_has_no_offers(self) -> None:
         service = PriceService()
         canonical = "LG OLED C4 OLED55C4RLA"
@@ -107,7 +169,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         cases = [
             (
                 SourceSearchStatus("Onliner", "found", 5),
-                "✅ Onliner — точных предложений: 5",
+                "✅ Onliner — предложение найдено",
             ),
             (
                 SourceSearchStatus("5 элемент", "filtered"),
