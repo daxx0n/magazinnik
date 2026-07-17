@@ -80,6 +80,7 @@ async def diagnose_query(
         "selected_product": None,
         "offers": [],
         "source_statuses": [],
+        "match_decisions": [],
         "error": None,
     }
 
@@ -119,6 +120,10 @@ async def diagnose_query(
         result["source_statuses"] = [
             asdict(status)
             for status in comparison.source_statuses
+        ]
+        result["match_decisions"] = [
+            asdict(decision)
+            for decision in comparison.match_decisions
         ]
     except Exception as error:
         result["error"] = (
