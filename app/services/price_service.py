@@ -6,6 +6,7 @@ from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import (
     ComparisonResult,
+    MatchDecision,
     SourceSearchStatus,
 )
 from app.sources import ProductNotFoundError
@@ -29,6 +30,7 @@ class PriceService:
             str,
             ProductCandidate,
         ] = {}
+        self._onliner_queries: dict[str, str] = {}
 
         self._onliner_source = OnlinerSource()
 
@@ -57,6 +59,7 @@ class PriceService:
 
         for product in products:
             self._onliner_candidates[product.key] = product
+            self._onliner_queries[product.key] = query
 
         return products
 
@@ -173,7 +176,10 @@ class PriceService:
             )
         cross_source_query = (
             self._build_cross_source_query(
-                canonical_title
+                self._onliner_queries.get(
+                    product_key,
+                    canonical_title,
+                )
             )
         )
 
@@ -198,6 +204,7 @@ class PriceService:
         )
 
         combined_offers = list(onliner_offers)
+        match_decisions: list[MatchDecision] = []
         source_statuses = [
             SourceSearchStatus(
                 source="Onliner",
@@ -229,7 +236,14 @@ class PriceService:
                 continue
 
             if source_name == "5 элемент":
-                source_offers, had_candidates = result
+                (
+                    source_offers,
+                    had_candidates,
+                    source_decisions,
+                ) = result
+                match_decisions.extend(
+                    source_decisions
+                )
             else:
                 had_candidates = bool(result)
                 source_offers = []
@@ -248,6 +262,19 @@ class PriceService:
                         offer.title,
                         mismatch_reason is None,
                         mismatch_reason or "exact_match",
+                    )
+                    match_decisions.append(
+                        MatchDecision(
+                            source=source_name,
+                            title=offer.title,
+                            accepted=(
+                                mismatch_reason is None
+                            ),
+                            reason=(
+                                mismatch_reason
+                                or "exact_match"
+                            ),
+                        )
                     )
 
                     if mismatch_reason is None:
@@ -278,18 +305,24 @@ class PriceService:
         return ComparisonResult(
             offers=offers,
             source_statuses=source_statuses,
+            match_decisions=match_decisions,
         )
 
     async def _search_five_element_by_query(
         self,
         query: str,
         canonical_title: str,
-    ) -> tuple[list[ProductOffer], bool]:
+    ) -> tuple[
+        list[ProductOffer],
+        bool,
+        list[MatchDecision],
+    ]:
         """Получает цену лучшей карточки 5 элемента."""
 
         products = await self.find_five_element_products(
             query
         )
+        decisions: list[MatchDecision] = []
 
         for product in products:
             mismatch_reason = (
@@ -305,6 +338,17 @@ class PriceService:
                 mismatch_reason is None,
                 mismatch_reason or "exact_match",
             )
+            decisions.append(
+                MatchDecision(
+                    source="5 элемент",
+                    title=product.title,
+                    accepted=mismatch_reason is None,
+                    reason=(
+                        mismatch_reason
+                        or "exact_match"
+                    ),
+                )
+            )
 
             if mismatch_reason is None:
                 return (
@@ -315,9 +359,10 @@ class PriceService:
                         )
                     ),
                     True,
+                    decisions,
                 )
 
-        return [], bool(products)
+        return [], bool(products), decisions
 
     @staticmethod
     def _build_cross_source_query(
