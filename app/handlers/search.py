@@ -13,6 +13,9 @@ from aiogram.utils.keyboard import (
 
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
+from app.models.search_result import (
+    SourceSearchStatus,
+)
 from app.services.price_service import PriceService
 from app.sources import (
     InvalidProductUrlError,
@@ -279,7 +282,7 @@ async def handle_product_selection(
     )
 
     try:
-        offers = (
+        comparison = (
             await price_service
             .search_all_sources_by_onliner_key(
                 product_key
@@ -314,7 +317,10 @@ async def handle_product_selection(
 
     await show_comparison(
         message=callback.message,
-        offers=offers,
+        offers=comparison.offers,
+        source_statuses=(
+            comparison.source_statuses
+        ),
     )
 
 @router.message(Command("five_search"))
@@ -718,6 +724,9 @@ def format_search_result(
 async def show_comparison(
     message: Message,
     offers: list[ProductOffer],
+    source_statuses: (
+        list[SourceSearchStatus] | None
+    ) = None,
 ) -> None:
     """Показывает сравнение площадок."""
 
@@ -789,6 +798,18 @@ async def show_comparison(
 
     cheapest_offer = offers[0]
 
+    if source_statuses:
+        lines.extend(
+            [
+                "Проверенные источники:",
+                *[
+                    format_source_status(status)
+                    for status in source_statuses
+                ],
+                "",
+            ]
+        )
+
     lines.extend(
         [
             "Самая низкая заявленная цена:",
@@ -808,6 +829,36 @@ async def show_comparison(
     await message.edit_text(
         "\n".join(lines),
         disable_web_page_preview=True,
+    )
+
+
+def format_source_status(
+    status: SourceSearchStatus,
+) -> str:
+    """Объясняет результат проверки источника."""
+
+    if status.state == "found":
+        return (
+            f"✅ {status.source} — "
+            f"точных предложений: "
+            f"{status.matched_offers}"
+        )
+
+    if status.state == "filtered":
+        return (
+            f"⚠️ {status.source} — варианты найдены, "
+            "но не совпали с выбранной моделью"
+        )
+
+    if status.state == "unavailable":
+        return (
+            f"❌ {status.source} — "
+            "временно недоступен"
+        )
+
+    return (
+        f"➖ {status.source} — "
+        "точная модель не найдена"
     )
 def build_five_element_keyboard(
     products: list[ProductCandidate],
