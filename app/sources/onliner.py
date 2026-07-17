@@ -51,7 +51,7 @@ class OnlinerSource:
     async def find_products(
         self,
         query: str,
-        limit: int = 5,
+        limit: int | None = None,
     ) -> list[ProductCandidate]:
         """Ищет карточки Onliner по названию товара."""
 
@@ -96,7 +96,10 @@ class OnlinerSource:
             used_keys.add(candidate.key)
             candidates.append(candidate)
 
-            if len(candidates) >= limit:
+            if (
+                limit is not None
+                and len(candidates) >= limit
+            ):
                 break
 
         return candidates
