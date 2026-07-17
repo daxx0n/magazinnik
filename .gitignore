@@ -9,4 +9,5 @@ data/five_element_index.json
 onliner_positions.json
 data/21vek_product.html
 data/21vek_diagnostics.json
+data/search_diagnostics_*.json
 *.log
