@@ -253,6 +253,9 @@ class PriceService:
                         self._model_mismatch_reason(
                             canonical_title,
                             offer.title,
+                            requested_title=(
+                                cross_source_query
+                            ),
                         )
                     )
                     logger.info(
@@ -329,6 +332,7 @@ class PriceService:
                 self._model_mismatch_reason(
                     canonical_title,
                     product.title,
+                    requested_title=query,
                 )
             )
             logger.info(
@@ -500,6 +504,7 @@ class PriceService:
     def _model_mismatch_reason(
         canonical_title: str,
         candidate_title: str,
+        requested_title: str | None = None,
     ) -> str | None:
         """Возвращает причину несовпадения моделей."""
 
@@ -615,9 +620,6 @@ class PriceService:
                 )
             }
 
-            if codes:
-                return codes
-
             # Некоторые магазины разделяют части одного артикула
             # дефисами или слешами: HBA-534-EB3 и HBA534EB3
             # должны считаться одним кодом.
@@ -626,6 +628,14 @@ class PriceService:
                 r"(?:[-_/.][a-zа-я0-9]+)+",
                 original_value.casefold(),
             ):
+                if re.fullmatch(
+                    r"\d+(?:gb|tb|mb|гб|тб|мб)"
+                    r"(?:[/_-]\d+"
+                    r"(?:gb|tb|mb|гб|тб|мб))+",
+                    raw_code,
+                ):
+                    continue
+
                 compact_code = re.sub(
                     r"[^a-zа-я0-9]",
                     "",
@@ -655,22 +665,80 @@ class PriceService:
 
             return codes
 
-        canonical_model_codes = model_codes(
-            canonical_title,
-            canonical,
+        code_reference_title = (
+            requested_title
+            if requested_title is not None
+            else canonical_title
+        )
+        normalized_code_reference = normalize(
+            code_reference_title
+        )
+        reference_model_codes = model_codes(
+            code_reference_title,
+            normalized_code_reference,
         )
         candidate_model_codes = model_codes(
             candidate_title,
             candidate,
         )
 
+        def short_model_codes(value: str) -> set[str]:
+            return {
+                token
+                for token in value.split()
+                if (
+                    2 <= len(token) <= 3
+                    and re.search(r"[a-zа-я]", token)
+                    and re.search(r"\d", token)
+                    and not re.fullmatch(
+                        r"\d+(?:gb|tb|mb|гб|тб|мб)",
+                        token,
+                    )
+                )
+            }
+
+        def compatible_codes(
+            first: str,
+            second: str,
+        ) -> bool:
+            if first == second:
+                return True
+
+            shorter, longer = sorted(
+                (first, second),
+                key=len,
+            )
+            return (
+                len(shorter) >= 5
+                and longer.endswith(shorter)
+            )
+
+        has_compatible_code = False
+
+        if reference_model_codes:
+            has_compatible_code = any(
+                compatible_codes(reference, candidate_code)
+                for reference in reference_model_codes
+                for candidate_code in candidate_model_codes
+            )
+
+            if not has_compatible_code:
+                return "model_code"
+
+        reference_short_codes = short_model_codes(
+            normalized_code_reference
+        )
+        candidate_short_codes = short_model_codes(
+            candidate
+        )
+
         if (
-            canonical_model_codes
-            and not canonical_model_codes.issubset(
-                candidate_model_codes
+            not has_compatible_code
+            and not reference_short_codes.issubset(
+                candidate_short_codes
             )
         ):
-            return "model_code"
+            return "model_number"
 
         memory_pattern = (
             r"\b(\d+)\s*"
@@ -732,7 +800,7 @@ class PriceService:
         )
 
         if (
-            not canonical_model_codes
+            not reference_model_codes
             and not canonical_numbers.issubset(
                 candidate_numbers
             )
