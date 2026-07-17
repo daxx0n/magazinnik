@@ -12,12 +12,16 @@ class FakeClient:
         return None
 
 
-def raw_product(key: str, title: str) -> dict[str, str]:
+def raw_product(
+    key: str,
+    title: str,
+    category: str = "mobile",
+) -> dict[str, str]:
     return {
         "key": key,
         "full_name": title,
         "html_url": (
-            "https://catalog.onliner.by/mobile/apple/"
+            f"https://catalog.onliner.by/{category}/apple/"
             f"{key}"
         ),
     }
@@ -39,6 +43,11 @@ class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
                             "iphone16black",
                             "Apple iPhone 16 256GB (черный)",
                         ),
+                        raw_product(
+                            "iphone17case",
+                            "Чехол для Apple iPhone 17",
+                            category="phonecase",
+                        ),
                     ]
                 },
                 {
@@ -49,7 +58,24 @@ class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
                         )
                     ]
                 },
-                {"products": []},
+                {
+                    "products": [
+                        raw_product(
+                            "iphone16case",
+                            "Чехол для Apple iPhone 16",
+                            category="phonecase",
+                        )
+                    ]
+                },
+                {
+                    "products": [
+                        raw_product(
+                            "iphone15glass",
+                            "Стекло для Apple iPhone 15",
+                            category="protectiveglass",
+                        )
+                    ]
+                },
             ]
         )
 
@@ -65,7 +91,7 @@ class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             source._request_json.await_count,
-            3,
+            4,
         )
         self.assertEqual(
             source._request_json.await_args_list[1].kwargs[
