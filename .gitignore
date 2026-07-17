@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.vscode/
+.DS_Store
+
+data/five_element_index.json
+onliner_positions.json
+*.log
