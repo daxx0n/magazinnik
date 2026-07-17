@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from collections.abc import Iterable
 
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
@@ -18,6 +19,7 @@ from app.sources.twenty_one_vek import (
     TwentyOneVekSource,
 )
 from app.services.product_variants import (
+    extract_color,
     extract_color_key,
 )
 
@@ -27,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 class PriceService:
     """Сервис поиска и сравнения цен."""
+
+    _aggregate_search_limit = 100
 
     def __init__(self) -> None:
         self._onliner_candidates: dict[
@@ -200,9 +204,9 @@ class PriceService:
                     canonical_title=canonical_title,
                     requested_title=requested_query,
                 ),
-                self._twenty_one_vek_source.find_offers(
+                self._search_twenty_one_vek_by_query(
                     query=cross_source_query,
-                    limit=20,
+                    canonical_title=canonical_title,
                 ),
                 return_exceptions=True,
             )
@@ -327,8 +331,23 @@ class PriceService:
     ]:
         """Получает цену лучшей карточки 5 элемента."""
 
-        products = await self.find_five_element_products(
-            query
+        search_queries = self._build_source_queries(
+            query=query,
+            canonical_title=canonical_title,
+        )
+        search_results = await asyncio.gather(
+            *(
+                self._five_element_source.find_products(
+                    query=source_query,
+                    limit=self._aggregate_search_limit,
+                )
+                for source_query in search_queries
+            )
+        )
+        products = self._unique_candidates(
+            product
+            for result in search_results
+            for product in result
         )
         decisions: list[MatchDecision] = []
 
@@ -372,6 +391,81 @@ class PriceService:
                 )
 
         return [], bool(products), decisions
+
+    async def _search_twenty_one_vek_by_query(
+        self,
+        query: str,
+        canonical_title: str,
+    ) -> list[ProductOffer]:
+        """Ищет 21vek по модели и вариантам цвета."""
+
+        search_results = await asyncio.gather(
+            *(
+                self._twenty_one_vek_source.find_offers(
+                    query=source_query,
+                    limit=self._aggregate_search_limit,
+                )
+                for source_query in self._build_source_queries(
+                    query=query,
+                    canonical_title=canonical_title,
+                )
+            ),
+            return_exceptions=True,
+        )
+        successful_results = [
+            result
+            for result in search_results
+            if not isinstance(result, BaseException)
+        ]
+
+        if not successful_results:
+            raise search_results[0]
+
+        unique: dict[str, ProductOffer] = {}
+
+        for result in successful_results:
+            for offer in result:
+                unique.setdefault(offer.url, offer)
+
+        return list(unique.values())
+
+    @staticmethod
+    def _build_source_queries(
+        query: str,
+        canonical_title: str,
+    ) -> list[str]:
+        """Добавляет варианты запроса с выбранным цветом."""
+
+        color = extract_color(canonical_title)
+        color_key = extract_color_key(canonical_title)
+        queries = []
+
+        for suffix in (color, color_key, None):
+            source_query = " ".join(
+                part
+                for part in (query, suffix)
+                if part
+            )
+
+            if source_query.casefold() not in {
+                item.casefold() for item in queries
+            }:
+                queries.append(source_query)
+
+        return queries
+
+    @staticmethod
+    def _unique_candidates(
+        products: Iterable[ProductCandidate],
+    ) -> list[ProductCandidate]:
+        """Убирает повторы карточек из нескольких запросов."""
+
+        unique: dict[str, ProductCandidate] = {}
+
+        for product in products:
+            unique.setdefault(product.key, product)
+
+        return list(unique.values())
 
     @staticmethod
     def _build_cross_source_query(
