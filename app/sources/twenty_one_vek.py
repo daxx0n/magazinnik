@@ -41,10 +41,10 @@ class TwentyOneVekSource:
     }
 
     _timeout = httpx.Timeout(
-        connect=10.0,
-        read=30.0,
-        write=10.0,
-        pool=10.0,
+        connect=20.0,
+        read=45.0,
+        write=20.0,
+        pool=20.0,
     )
 
     async def search(
@@ -108,11 +108,16 @@ class TwentyOneVekSource:
     ) -> str:
         """Загружает HTML карточки товара."""
 
+        transport = httpx.AsyncHTTPTransport(
+            retries=2,
+        )
+
         try:
             async with httpx.AsyncClient(
                 headers=self._headers,
                 timeout=self._timeout,
                 follow_redirects=True,
+                transport=transport,
             ) as client:
                 response = await client.get(
                     product_url
@@ -120,9 +125,16 @@ class TwentyOneVekSource:
 
             response.raise_for_status()
 
-        except httpx.TimeoutException as error:
+        except httpx.ConnectTimeout as error:
             raise SourceUnavailableError(
-                "21vek не ответил вовремя."
+                "Не удалось установить соединение "
+                "с 21vek после нескольких попыток."
+            ) from error
+
+        except httpx.ReadTimeout as error:
+            raise SourceUnavailableError(
+                "21vek слишком долго передавал "
+                "страницу товара."
             ) from error
 
         except httpx.HTTPStatusError as error:
