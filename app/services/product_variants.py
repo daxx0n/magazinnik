@@ -49,6 +49,21 @@ _COLOR_MARKERS = (
     "коричн",
     "бирюз",
 )
+_COLOR_ALIASES = {
+    "black": ("black", "черн", "графит"),
+    "white": ("white", "бел"),
+    "blue": ("blue", "син", "голуб", "бирюз"),
+    "green": ("green", "зелен"),
+    "yellow": ("yellow", "желт"),
+    "gold": ("gold", "золот"),
+    "red": ("red", "красн"),
+    "purple": ("purple", "фиолет", "сирен", "лилов"),
+    "pink": ("pink", "розов"),
+    "orange": ("orange", "оранж"),
+    "gray": ("gray", "grey", "серый", "серая", "серое"),
+    "silver": ("silver", "серебр"),
+    "beige": ("beige", "беж", "коричн"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +111,18 @@ def extract_color(title: str) -> str | None:
         return None
 
     return value
+
+
+def extract_color_key(title: str) -> str | None:
+    """Нормализует русское или английское название цвета."""
+
+    normalized = title.casefold()
+
+    for color_key, aliases in _COLOR_ALIASES.items():
+        if any(alias in normalized for alias in aliases):
+            return color_key
+
+    return None
 
 
 def base_product_title(title: str) -> str:
