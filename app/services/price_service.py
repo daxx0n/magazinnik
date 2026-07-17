@@ -17,6 +17,9 @@ from app.sources.onliner import OnlinerSource
 from app.sources.twenty_one_vek import (
     TwentyOneVekSource,
 )
+from app.services.product_variants import (
+    extract_color_key,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -174,12 +177,13 @@ class PriceService:
             raise ProductNotFoundError(
                 "Не удалось определить выбранную модель."
             )
+        requested_query = self._onliner_queries.get(
+            product_key,
+            canonical_title,
+        )
         cross_source_query = (
             self._build_cross_source_query(
-                self._onliner_queries.get(
-                    product_key,
-                    canonical_title,
-                )
+                canonical_title
             )
         )
 
@@ -194,6 +198,7 @@ class PriceService:
                 self._search_five_element_by_query(
                     query=cross_source_query,
                     canonical_title=canonical_title,
+                    requested_title=requested_query,
                 ),
                 self._twenty_one_vek_source.find_offers(
                     query=cross_source_query,
@@ -254,7 +259,7 @@ class PriceService:
                             canonical_title,
                             offer.title,
                             requested_title=(
-                                cross_source_query
+                                requested_query
                             ),
                         )
                     )
@@ -314,6 +319,7 @@ class PriceService:
         self,
         query: str,
         canonical_title: str,
+        requested_title: str,
     ) -> tuple[
         list[ProductOffer],
         bool,
@@ -331,7 +337,7 @@ class PriceService:
                 self._model_mismatch_reason(
                     canonical_title,
                     product.title,
-                    requested_title=query,
+                    requested_title=requested_title,
                 )
             )
             logger.info(
@@ -374,7 +380,7 @@ class PriceService:
         """Убирает цвет и магазинный код из запроса."""
 
         query = re.sub(
-            r"[()]",
+            r"\([^()]*\)",
             " ",
             title,
         )
@@ -582,6 +588,20 @@ class PriceService:
             and not is_accessory(canonical)
         ):
             return "accessory"
+
+        canonical_color = extract_color_key(
+            canonical_title
+        )
+        candidate_color = extract_color_key(
+            candidate_title
+        )
+
+        if (
+            canonical_color is not None
+            and candidate_color is not None
+            and canonical_color != candidate_color
+        ):
+            return "color"
 
         def model_codes(
             original_value: str,
