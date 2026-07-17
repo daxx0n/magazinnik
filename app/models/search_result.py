@@ -13,8 +13,19 @@ class SourceSearchStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class MatchDecision:
+    """Решение о найденном кандидате магазина."""
+
+    source: str
+    title: str
+    accepted: bool
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class ComparisonResult:
     """Предложения и отчёт по проверенным источникам."""
 
     offers: list[ProductOffer]
     source_statuses: list[SourceSearchStatus]
+    match_decisions: list[MatchDecision]
