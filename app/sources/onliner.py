@@ -1,6 +1,10 @@
+import asyncio
 import re
+import time
+from collections import OrderedDict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from urllib.parse import urlparse
 
 import httpx
@@ -52,6 +56,9 @@ class OnlinerSource:
     )
 
     _category_discovery_pages = 12
+    _category_page_concurrency = 5
+    _search_page_cache_ttl = 30.0
+    _search_page_cache_size = 256
     _accessory_categories = {
         "cable",
         "chargersmobile",
@@ -86,6 +93,16 @@ class OnlinerSource:
         "washingmachine": "Стиральные машины",
     }
 
+    def __init__(self) -> None:
+        self._search_page_cache: OrderedDict[
+            tuple[str, int],
+            tuple[float, dict],
+        ] = OrderedDict()
+        self._search_page_tasks: dict[
+            tuple[str, int],
+            asyncio.Task[dict],
+        ] = {}
+
     async def find_categories(
         self,
         query: str,
@@ -101,66 +118,86 @@ class OnlinerSource:
         query_brand_key = self._normalize_brand_key(
             normalized_query
         )
-        page = 1
-        last_page = self._category_discovery_pages
+
+        def append_page(data: dict) -> bool:
+            raw_products = data.get("products", [])
+
+            if not isinstance(raw_products, list) or not raw_products:
+                return False
+
+            for raw_product in raw_products:
+                if not isinstance(raw_product, dict):
+                    continue
+
+                candidate = self._parse_candidate(raw_product)
+
+                if candidate is None:
+                    continue
+
+                if self._product_brand_key(candidate.url) != (
+                    query_brand_key
+                ):
+                    continue
+
+                category_key = self._product_category_key(
+                    raw_product,
+                    candidate,
+                )
+
+                if (
+                    not category_key
+                    or category_key in self._accessory_categories
+                ):
+                    continue
+
+                categories.setdefault(
+                    category_key,
+                    ProductCategory(
+                        key=category_key,
+                        title=self._category_title(category_key),
+                    ),
+                )
+
+            return True
 
         async with self._create_client() as client:
-            while page <= min(
-                last_page,
-                self._category_discovery_pages,
-            ):
-                data = await self._request_json(
+            async def load_page(page: int) -> dict:
+                return await self._load_search_page(
                     client=client,
-                    url=self._search_endpoint,
-                    params={
-                        "query": normalized_query,
-                        "page": str(page),
-                    },
-                )
-                raw_products = data.get("products", [])
-
-                if not isinstance(raw_products, list) or not raw_products:
-                    break
-
-                last_page = self._last_page(
-                    data=data,
-                    fallback=page,
+                    query=normalized_query,
+                    page=page,
                 )
 
-                for raw_product in raw_products:
-                    if not isinstance(raw_product, dict):
-                        continue
+            first_page = await load_page(1)
 
-                    candidate = self._parse_candidate(raw_product)
+            if not append_page(first_page):
+                return []
 
-                    if candidate is None:
-                        continue
+            last_page = min(
+                self._last_page(
+                    data=first_page,
+                    fallback=1,
+                ),
+                self._category_discovery_pages,
+            )
+            next_page = 2
 
-                    if self._product_brand_key(candidate.url) != (
-                        query_brand_key
-                    ):
-                        continue
-
-                    category_key = self._product_category_key(
-                        raw_product,
-                        candidate,
+            while next_page <= last_page:
+                batch_end = min(
+                    next_page + self._category_page_concurrency,
+                    last_page + 1,
+                )
+                pages = await asyncio.gather(
+                    *(
+                        load_page(page)
+                        for page in range(next_page, batch_end)
                     )
+                )
 
-                    if (
-                        not category_key
-                        or category_key in self._accessory_categories
-                    ):
-                        continue
+                for data in pages:
+                    append_page(data)
 
-                    categories.setdefault(
-                        category_key,
-                        ProductCategory(
-                            key=category_key,
-                            title=self._category_title(category_key),
-                        ),
-                    )
-
-                page += 1
+                next_page = batch_end
 
         return list(categories.values())
 
@@ -179,6 +216,13 @@ class OnlinerSource:
         if len(normalized_query) < 3:
             return []
 
+        if category is not None:
+            return await self._find_products_in_category(
+                query=normalized_query,
+                category=category,
+                limit=limit,
+            )
+
         candidates: list[ProductCandidate] = []
         used_keys: set[str] = set()
         primary_category = category
@@ -189,13 +233,10 @@ class OnlinerSource:
 
         async with self._create_client() as client:
             while page <= 100:
-                data = await self._request_json(
+                data = await self._load_search_page(
                     client=client,
-                    url=self._search_endpoint,
-                    params={
-                        "query": normalized_query,
-                        "page": str(page),
-                    },
+                    query=normalized_query,
+                    page=page,
                 )
                 raw_products = data.get(
                     "products",
@@ -287,6 +328,169 @@ class OnlinerSource:
             candidates=grouped_candidates,
             query=normalized_query,
         )
+
+    async def _find_products_in_category(
+        self,
+        query: str,
+        category: str,
+        limit: int | None,
+    ) -> list[ProductCandidate]:
+        """Параллельно дочитывает выдачу выбранной категории."""
+
+        candidates: list[ProductCandidate] = []
+        used_keys: set[str] = set()
+
+        def append_page(data: dict) -> None:
+            raw_products = data.get("products", [])
+
+            if not isinstance(raw_products, list):
+                return
+
+            for raw_product in raw_products:
+                if not isinstance(raw_product, dict):
+                    continue
+
+                candidate = self._parse_candidate(raw_product)
+
+                if (
+                    candidate is None
+                    or candidate.key in used_keys
+                    or self._product_category_key(
+                        raw_product,
+                        candidate,
+                    )
+                    != category
+                ):
+                    continue
+
+                used_keys.add(candidate.key)
+                candidates.append(candidate)
+
+        async with self._create_client() as client:
+            async def load_page(page: int) -> dict:
+                return await self._load_search_page(
+                    client=client,
+                    query=query,
+                    page=page,
+                )
+
+            first_page = await load_page(1)
+            append_page(first_page)
+
+            if limit is not None and len(candidates) >= limit:
+                grouped = self._group_variants(candidates[:limit])
+                return self._sort_product_family(
+                    candidates=grouped,
+                    query=query,
+                )
+
+            last_page = self._last_page(
+                data=first_page,
+                fallback=1,
+            )
+
+            next_page = 2
+
+            while next_page <= last_page:
+                batch_end = min(
+                    next_page + self._category_page_concurrency,
+                    last_page + 1,
+                )
+                pages = await asyncio.gather(
+                    *(
+                        load_page(page)
+                        for page in range(next_page, batch_end)
+                    )
+                )
+
+                for data in pages:
+                    append_page(data)
+
+                    if limit is not None and len(candidates) >= limit:
+                        grouped = self._group_variants(
+                            candidates[:limit]
+                        )
+                        return self._sort_product_family(
+                            candidates=grouped,
+                            query=query,
+                        )
+
+                next_page = batch_end
+
+        grouped_candidates = self._group_variants(candidates)
+        return self._sort_product_family(
+            candidates=grouped_candidates,
+            query=query,
+        )
+
+    async def _load_search_page(
+        self,
+        client,
+        query: str,
+        page: int,
+    ) -> dict:
+        """Кэширует страницу поиска и объединяет одинаковые запросы."""
+
+        cache_key = (
+            " ".join(query.casefold().split()),
+            page,
+        )
+        cached = self._search_page_cache.get(cache_key)
+        now = time.monotonic()
+
+        if cached is not None:
+            cached_at, data = cached
+
+            if now - cached_at <= self._search_page_cache_ttl:
+                self._search_page_cache.move_to_end(cache_key)
+                return data
+
+            self._search_page_cache.pop(cache_key, None)
+
+        task = self._search_page_tasks.get(cache_key)
+
+        if task is None:
+            task = asyncio.create_task(
+                self._request_json(
+                    client=client,
+                    url=self._search_endpoint,
+                    params={
+                        "query": query,
+                        "page": str(page),
+                    },
+                )
+            )
+            self._search_page_tasks[cache_key] = task
+            task.add_done_callback(
+                partial(
+                    self._complete_search_page,
+                    cache_key,
+                )
+            )
+
+        return await asyncio.shield(task)
+
+    def _complete_search_page(
+        self,
+        cache_key: tuple[str, int],
+        task: asyncio.Task[dict],
+    ) -> None:
+        """Сохраняет только успешно загруженную страницу."""
+
+        if self._search_page_tasks.get(cache_key) is task:
+            self._search_page_tasks.pop(cache_key, None)
+
+        if task.cancelled() or task.exception() is not None:
+            return
+
+        self._search_page_cache[cache_key] = (
+            time.monotonic(),
+            task.result(),
+        )
+        self._search_page_cache.move_to_end(cache_key)
+
+        while len(self._search_page_cache) > self._search_page_cache_size:
+            self._search_page_cache.popitem(last=False)
 
     @staticmethod
     def _extract_category(product_url: str) -> str:
