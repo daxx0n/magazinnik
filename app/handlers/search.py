@@ -1146,7 +1146,18 @@ async def show_color_selection(
     builder = InlineKeyboardBuilder()
     used_labels: set[str] = set()
 
-    for product in products:
+    sorted_products = sorted(
+        products,
+        key=lambda product: (
+            (
+                display_color(product.title)
+                or product.title
+            ).casefold(),
+            product.title.casefold(),
+        ),
+    )
+
+    for product in sorted_products:
         label = display_color(product.title)
 
         if label is None:
