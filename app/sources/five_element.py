@@ -208,9 +208,6 @@ class FiveElementSource:
         title = raw_product.get("name")
         link_url = raw_product.get("link_url")
 
-        if raw_product.get("available") is False:
-            return None
-
         if not all(
             isinstance(value, str) and value.strip()
             for value in (
