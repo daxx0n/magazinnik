@@ -59,7 +59,7 @@ DEFAULT_QUERIES = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Прогоняет поиск по четырём источникам "
+            "Прогоняет поиск по пяти источникам "
             "и сохраняет диагностический отчёт."
         )
     )
