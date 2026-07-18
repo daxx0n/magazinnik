@@ -54,6 +54,21 @@ class ModelMatchingTest(unittest.TestCase):
                 "Apple iPhone 17 512GB White",
                 "color",
             ),
+            (
+                "Apple iPhone 17 512GB (черный)",
+                "Apple iPhone 17 512GB Dual eSIM Black",
+                "sim",
+            ),
+            (
+                "Apple iPhone 17 512GB (черный)",
+                "Apple iPhone 17 512GB Dual eSIM Black MG6P4",
+                "sim",
+            ),
+            (
+                "Apple iPhone 17 Dual SIM 512GB (черный)",
+                "Apple iPhone 17 512GB Black",
+                "sim",
+            ),
         ]
 
         for canonical, candidate, reason in cases:
@@ -183,6 +198,10 @@ class ModelMatchingTest(unittest.TestCase):
             (
                 "Apple MacBook Air M3",
                 "Ноутбук Apple MacBook Air 13 M3",
+            ),
+            (
+                "Apple iPhone 17 512GB (черный)",
+                "Apple iPhone 17 512GB Black MG6P4",
             ),
         ]
 
