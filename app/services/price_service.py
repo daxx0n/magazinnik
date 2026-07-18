@@ -21,8 +21,10 @@ from app.sources.twenty_one_vek import (
     TwentyOneVekSource,
 )
 from app.services.product_variants import (
+    display_color,
     extract_color,
     extract_color_key,
+    extract_memory,
 )
 
 
@@ -513,10 +515,10 @@ class PriceService:
         """Добавляет варианты запроса с выбранным цветом."""
 
         color = extract_color(canonical_title)
-        color_key = extract_color_key(canonical_title)
+        marketing_color = display_color(canonical_title)
         queries = []
 
-        for suffix in (color, color_key, None):
+        for suffix in (color, marketing_color, None):
             source_query = " ".join(
                 part
                 for part in (query, suffix)
@@ -802,9 +804,9 @@ class PriceService:
                 original_value.casefold(),
             ):
                 if re.fullmatch(
-                    r"\d+(?:gb|tb|mb|гб|тб|мб)"
+                    r"\d+(?:gb|tb|mb|гб|тб|мб)?"
                     r"(?:[/_-]\d+"
-                    r"(?:gb|tb|mb|гб|тб|мб))+",
+                    r"(?:gb|tb|mb|гб|тб|мб)?)+",
                     raw_code,
                 ):
                     continue
@@ -913,37 +915,23 @@ class PriceService:
         ):
             return "model_number"
 
-        memory_pattern = (
-            r"\b(\d+)\s*"
-            r"(gb|tb|mb|гб|тб|мб)\b"
-        )
+        def memory_specs(value: str) -> set[tuple[str, str]]:
+            label = extract_memory(value)
 
-        unit_aliases = {
-            "гб": "gb",
-            "тб": "tb",
-            "мб": "mb",
-        }
+            if label is None:
+                return set()
 
-        canonical_memory = {
-            (
-                amount,
-                unit_aliases.get(unit, unit),
-            )
-            for amount, unit in re.findall(
-                memory_pattern,
-                canonical,
-            )
-        }
-        candidate_memory = {
-            (
-                amount,
-                unit_aliases.get(unit, unit),
-            )
-            for amount, unit in re.findall(
-                memory_pattern,
-                candidate,
-            )
-        }
+            return {
+                (amount, unit.casefold())
+                for amount, unit in re.findall(
+                    r"(\d+)(MB|GB|TB)",
+                    label,
+                    flags=re.IGNORECASE,
+                )
+            }
+
+        canonical_memory = memory_specs(canonical_title)
+        candidate_memory = memory_specs(candidate_title)
 
         if (
             canonical_memory
