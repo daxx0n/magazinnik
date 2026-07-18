@@ -10,6 +10,8 @@ class SourceSearchStatus:
     source: str
     state: str
     matched_offers: int = 0
+    checked_candidates: int = 0
+    duration_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,3 +31,7 @@ class ComparisonResult:
     offers: list[ProductOffer]
     source_statuses: list[SourceSearchStatus]
     match_decisions: list[MatchDecision]
+    query: str = ""
+    product_title: str = ""
+    duration_seconds: float = 0.0
+    completed_at: str = ""
