@@ -5,9 +5,11 @@ from app.handlers.search import (
     handle_search,
     product_search_parents,
     product_searches,
+    show_color_selection,
 )
 from app.models.category import ProductCategory
 from app.models.product import ProductCandidate
+from app.services.product_variants import ProductVariantGroup
 
 
 class SearchCategoriesTest(unittest.IsolatedAsyncioTestCase):
@@ -82,6 +84,44 @@ class SearchCategoriesTest(unittest.IsolatedAsyncioTestCase):
         )
         text = status_message.edit_text.await_args.args[0]
         self.assertIn("Выбери точную модель", text)
+
+    async def test_sorts_original_color_labels(self) -> None:
+        products = [
+            ProductCandidate(
+                "lavender",
+                "Apple iPhone 17 256GB (сиреневый)",
+                "https://example.com/lavender",
+            ),
+            ProductCandidate(
+                "blue",
+                "Apple iPhone 17 256GB (голубой)",
+                "https://example.com/blue",
+            ),
+            ProductCandidate(
+                "black",
+                "Apple iPhone 17 256GB (черный)",
+                "https://example.com/black",
+            ),
+        ]
+        message = AsyncMock()
+
+        await show_color_selection(
+            message=message,
+            group=ProductVariantGroup(
+                title="Apple iPhone 17",
+                products=products,
+            ),
+            products=products,
+            back_callback="olp:search:0",
+        )
+
+        keyboard = message.edit_text.await_args.kwargs[
+            "reply_markup"
+        ]
+        self.assertEqual(
+            [row[0].text for row in keyboard.inline_keyboard],
+            ["Black", "Lavender", "Mist Blue", "⬅️ Назад"],
+        )
 
 
 if __name__ == "__main__":
