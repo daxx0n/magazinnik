@@ -341,12 +341,13 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
 
         offers = await service._search_zeon_query(
             query="Apple iPhone 17 512GB",
+            canonical_title="Apple iPhone 17 512GB (черный)",
         )
 
         self.assertEqual(offers, [offer])
-        service._zeon_source.find_offers.assert_awaited_once_with(
-            query="Apple iPhone 17 512GB",
-            limit=20,
+        self.assertEqual(
+            service._zeon_source.find_offers.await_count,
+            3,
         )
 
     async def test_reuses_recent_external_search_results(self) -> None:
@@ -881,6 +882,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         )
         service._search_zeon_query.assert_awaited_once_with(
             query="Духовой шкаф Bosch HBA534EB3",
+            canonical_title=canonical,
         )
 
     async def test_bounds_onliner_candidate_cache(self) -> None:
