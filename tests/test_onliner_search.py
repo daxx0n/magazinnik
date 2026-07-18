@@ -44,6 +44,47 @@ def search_page(
 
 
 class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
+    def test_prioritizes_exact_non_iphone_model_family(self) -> None:
+        candidates = [
+            OnlinerSource._parse_candidate(
+                OnlinerSource(),
+                raw_product(
+                    "q8-max-pro",
+                    "Roborock Q8 Max Pro (белый)",
+                    category="robotcleaner",
+                    brand="roborock",
+                ),
+            ),
+            OnlinerSource._parse_candidate(
+                OnlinerSource(),
+                raw_product(
+                    "q8-max-plus",
+                    "Roborock Q8 Max+ (черный)",
+                    category="robotcleaner",
+                    brand="roborock",
+                ),
+            ),
+            OnlinerSource._parse_candidate(
+                OnlinerSource(),
+                raw_product(
+                    "q8-max",
+                    "Roborock Q8 Max (черный)",
+                    category="robotcleaner",
+                    brand="roborock",
+                ),
+            ),
+        ]
+        parsed_candidates = [
+            candidate for candidate in candidates if candidate is not None
+        ]
+
+        sorted_candidates = OnlinerSource._sort_product_family(
+            parsed_candidates,
+            "Roborock Q8 Max",
+        )
+
+        self.assertEqual(sorted_candidates[0].key, "q8-max")
+
     async def test_discovers_device_categories_for_brand_query(self) -> None:
         source = OnlinerSource()
         source._create_client = lambda: FakeClient()
