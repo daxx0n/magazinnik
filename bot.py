@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 
 from aiogram import Bot, Dispatcher
@@ -27,6 +28,13 @@ async def main() -> None:
 
     dispatcher.include_router(common.router)
     dispatcher.include_router(search.router)
+    search.initialize_price_history(config.price_database_path)
+    alert_task = asyncio.create_task(
+        search.run_price_alert_loop(
+            bot,
+            config.price_alert_interval_seconds,
+        )
+    )
 
     try:
         print(
@@ -36,6 +44,11 @@ async def main() -> None:
 
         await dispatcher.start_polling(bot)
     finally:
+        alert_task.cancel()
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await alert_task
+
         await bot.session.close()
 
 
