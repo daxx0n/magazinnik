@@ -27,6 +27,34 @@ class ModelMatchingTest(unittest.TestCase):
             "Apple iPhone 17 512GB",
         )
 
+    def test_builds_source_queries_with_marketing_color(self) -> None:
+        cases = [
+            (
+                "Apple iPhone 17 512GB (голубой)",
+                [
+                    "Apple iPhone 17 512GB голубой",
+                    "Apple iPhone 17 512GB Mist Blue",
+                    "Apple iPhone 17 512GB",
+                ],
+            ),
+            (
+                "Apple iPhone 15 Pro 256GB (природный титан)",
+                [
+                    "Apple iPhone 15 Pro 256GB природный титан",
+                    "Apple iPhone 15 Pro 256GB Natural Titanium",
+                    "Apple iPhone 15 Pro 256GB",
+                ],
+            ),
+        ]
+
+        for title, expected in cases:
+            with self.subTest(title=title):
+                query = PriceService._build_cross_source_query(title)
+                self.assertEqual(
+                    PriceService._build_source_queries(query, title),
+                    expected,
+                )
+
     def test_explains_mismatch_reason(self) -> None:
         cases = [
             (
@@ -50,6 +78,11 @@ class ModelMatchingTest(unittest.TestCase):
                 "memory",
             ),
             (
+                "Samsung Galaxy A55 8/256GB",
+                "Samsung Galaxy A55 12/256GB",
+                "memory",
+            ),
+            (
                 "Apple MacBook Air M3",
                 "Apple MacBook Air M2",
                 "model_number",
@@ -67,6 +100,26 @@ class ModelMatchingTest(unittest.TestCase):
             (
                 "Apple iPhone 17 512GB (черный)",
                 "Apple iPhone 17 512GB White",
+                "color",
+            ),
+            (
+                "Apple iPhone 17 512GB (синий)",
+                "Apple iPhone 17 512GB Blue",
+                "color",
+            ),
+            (
+                "Blackview BV9300 Pro 12GB/256GB (зеленый)",
+                "Blackview BV9300 Pro 12GB/256GB Black",
+                "color",
+            ),
+            (
+                "Телефон Samsung 256GB (графитовый)",
+                "Телефон Samsung 256GB Black",
+                "color",
+            ),
+            (
+                "Телефон Samsung 256GB (голубой)",
+                "Телефон Samsung 256GB Blue",
                 "color",
             ),
             (
@@ -209,6 +262,22 @@ class ModelMatchingTest(unittest.TestCase):
             (
                 "Samsung Galaxy S24 Ultra",
                 "Смартфон Samsung Galaxy S24 Ultra 5G",
+            ),
+            (
+                "Samsung Galaxy S24 256GB (синий)",
+                "Samsung Galaxy S24 256GB Blue",
+            ),
+            (
+                "Apple iPhone 17 512GB (синий)",
+                "Apple iPhone 17 512GB Mist Blue",
+            ),
+            (
+                "Apple iPhone 17 512GB (фиолетовый)",
+                "Apple iPhone 17 512GB Lavender",
+            ),
+            (
+                "Samsung Galaxy A55 8GB/256GB",
+                "Samsung Galaxy A55 8/256GB",
             ),
             (
                 "Apple MacBook Air M3",
