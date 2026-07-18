@@ -17,7 +17,8 @@ async def handle_start(message: Message) -> None:
         "Отправь название товара, например:\n"
         "iPhone 17 256GB\n\n"
         "Доступные команды:\n"
-        "/help — инструкция"
+        "/help — инструкция\n"
+        "/diagnostics — отчёт последнего поиска"
     )
 
 
@@ -30,6 +31,8 @@ async def handle_help(message: Message) -> None:
         "🔎 Сравнение цен в Onliner, "
         "21vek, 5 элементе и Shop.by:\n"
         "Просто отправь название товара.\n\n"
+        "Диагностика последнего сравнения:\n"
+        "/diagnostics\n\n"
         "Прямая ссылка Onliner:\n"
         "/onliner ССЫЛКА\n\n"
         "Прямая ссылка 21vek:\n"
