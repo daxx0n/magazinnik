@@ -673,6 +673,22 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             [status.state for status in result.source_statuses],
             ["found", "filtered", "not_found", "found"],
         )
+        self.assertEqual(
+            [
+                status.checked_candidates
+                for status in result.source_statuses
+            ],
+            [2, 0, 0, 1],
+        )
+        self.assertTrue(
+            all(
+                status.duration_seconds >= 0
+                for status in result.source_statuses
+            )
+        )
+        self.assertEqual(result.query, "Bosch HBA534EB3")
+        self.assertEqual(result.product_title, canonical)
+        self.assertGreaterEqual(result.duration_seconds, 0)
         service._search_five_element_by_query.assert_awaited_once_with(
             query="Духовой шкаф Bosch HBA534EB3",
             canonical_title=canonical,
