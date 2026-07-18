@@ -453,6 +453,7 @@ class PriceService:
             completed_at=datetime.now().strftime(
                 "%d.%m.%Y %H:%M:%S"
             ),
+            product_key=product_key,
         )
 
     @staticmethod
@@ -961,6 +962,49 @@ class PriceService:
         ):
             return "accessory"
 
+        def product_condition(value: str) -> str:
+            normalized_value = value.casefold().replace("ё", "е")
+
+            if re.search(
+                r"\b(?:refurbished|renewed|reconditioned|"
+                r"восстановлен\w*|как\s+нов\w*)\b",
+                normalized_value,
+            ):
+                return "refurbished"
+
+            if re.search(
+                r"(?:\bused\b|\bб\s*/\s*у\b|"
+                r"бывш\w*\s+в\s+употреблен\w*)",
+                normalized_value,
+            ):
+                return "used"
+
+            return "new"
+
+        if product_condition(canonical_title) != product_condition(
+            candidate_title
+        ):
+            return "condition"
+
+        def is_bundle(value: str) -> bool:
+            normalized_value = value.casefold().replace("ё", "е")
+            normalized_value = re.sub(
+                r"\b(?:nano\s*)?sim\s*\+\s*e\s*sim\b",
+                " ",
+                normalized_value,
+            )
+            return bool(
+                re.search(
+                    r"\s\+\s|\bbundle\b|"
+                    r"\bкомплект\w*\s+(?:с|из)\b|"
+                    r"\bв\s+комплекте\s+с\b",
+                    normalized_value,
+                )
+            )
+
+        if is_bundle(canonical_title) != is_bundle(candidate_title):
+            return "bundle"
+
         canonical_color = extract_color_key(
             canonical_title
         )
@@ -1056,6 +1100,10 @@ class PriceService:
             candidate_title,
             candidate,
         )
+        canonical_model_codes = model_codes(
+            canonical_title,
+            canonical,
+        )
 
         def short_model_codes(value: str) -> set[str]:
             return {
@@ -1083,10 +1131,63 @@ class PriceService:
                 (first, second),
                 key=len,
             )
-            return (
+            if (
                 len(shorter) >= 5
                 and longer.endswith(shorter)
+            ):
+                return True
+
+            if not longer.startswith(shorter):
+                return False
+
+            regional_suffix = longer[len(shorter):]
+            supports_regional_suffix = bool(
+                re.fullmatch(
+                    r"(?:sm[a-z]\d{3,4}[a-z]|[mnfp][a-z0-9]{4})",
+                    shorter,
+                )
             )
+            return (
+                supports_regional_suffix
+                and len(regional_suffix) >= 2
+                and bool(re.search(r"[a-zа-я]", regional_suffix))
+            )
+
+        def wildcard_code_matches(
+            wildcard_code: str,
+            candidate_code: str,
+        ) -> bool:
+            """Сопоставляет CFI-21XX с CFI-2116A/A01Y."""
+
+            if "xx" not in wildcard_code:
+                return False
+
+            pattern = "".join(
+                r"\d" if character == "x" else re.escape(character)
+                for character in wildcard_code
+            )
+            return bool(
+                re.fullmatch(
+                    pattern + r"[a-zа-я0-9]{0,4}",
+                    candidate_code,
+                )
+            )
+
+        canonical_wildcard_codes = {
+            code for code in canonical_model_codes if "xx" in code
+        }
+        has_compatible_wildcard_code = any(
+            wildcard_code_matches(reference, candidate_code)
+            for reference in canonical_wildcard_codes
+            for candidate_code in candidate_model_codes
+        )
+
+        if (
+            canonical_wildcard_codes
+            and candidate_model_codes
+            and not has_compatible_wildcard_code
+        ):
+            return "model_code"
 
         has_compatible_code = False
 
@@ -1162,6 +1263,7 @@ class PriceService:
 
         if (
             not reference_model_codes
+            and not has_compatible_wildcard_code
             and not canonical_numbers.issubset(
                 candidate_numbers
             )
