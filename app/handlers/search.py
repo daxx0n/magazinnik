@@ -1,9 +1,12 @@
+import asyncio
 import logging
+import os
 import secrets
 from collections import Counter, OrderedDict
 from dataclasses import dataclass
+from datetime import datetime
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
@@ -23,6 +26,7 @@ from app.models.search_result import (
     SourceSearchStatus,
 )
 from app.services.price_service import PriceService
+from app.services.price_history import PriceHistoryRepository
 from app.services.product_variants import (
     ProductVariantGroup,
     display_color,
@@ -73,6 +77,31 @@ comparison_diagnostics: OrderedDict[
     int,
     ComparisonResult,
 ] = OrderedDict()
+price_history_repository: PriceHistoryRepository | None = None
+
+
+def initialize_price_history(database_path: str | None = None) -> None:
+    """Подключает постоянное хранилище цен и подписок."""
+
+    global price_history_repository
+    price_history_repository = PriceHistoryRepository(
+        database_path
+        or os.getenv(
+            "PRICE_DATABASE_PATH",
+            "data/magazinnik.sqlite3",
+        )
+    )
+    price_history_repository.initialize()
+
+
+def get_price_history_repository() -> PriceHistoryRepository:
+    global price_history_repository
+
+    if price_history_repository is None:
+        initialize_price_history()
+
+    assert price_history_repository is not None
+    return price_history_repository
 
 
 @router.message(Command("diagnostics", "debug"))
@@ -97,6 +126,98 @@ async def handle_diagnostics(message: Message) -> None:
     await message.answer(
         format_comparison_diagnostics(comparison),
         disable_web_page_preview=True,
+    )
+
+
+@router.callback_query(F.data.startswith("price_history:"))
+async def handle_price_history(callback: CallbackQuery) -> None:
+    """Показывает последние минимальные цены товара."""
+
+    await callback.answer()
+
+    if callback.message is None:
+        return
+
+    product_key = (callback.data or "").removeprefix(
+        "price_history:"
+    )
+    points = await asyncio.to_thread(
+        get_price_history_repository().history,
+        product_key,
+        10,
+    )
+
+    if not points:
+        await callback.message.answer(
+            "История для этого товара пока не накоплена."
+        )
+        return
+
+    lines = ["📉 История минимальной цены", ""]
+
+    for point in points:
+        try:
+            observed_at = datetime.fromisoformat(
+                point.observed_at
+            ).astimezone().strftime("%d.%m.%Y %H:%M")
+        except ValueError:
+            observed_at = point.observed_at
+
+        lines.append(
+            f"• {observed_at}: {point.price:.2f} "
+            f"{point.currency} — {point.source}"
+        )
+
+    await callback.message.answer("\n".join(lines))
+
+
+@router.callback_query(F.data.startswith("price_alert:"))
+async def handle_price_alert(callback: CallbackQuery) -> None:
+    """Включает или отключает уведомления о снижении цены."""
+
+    if callback.message is None:
+        await callback.answer()
+        return
+
+    chat_id = message_chat_id(callback.message)
+    product_key = (callback.data or "").removeprefix(
+        "price_alert:"
+    )
+    comparison = (
+        comparison_diagnostics.get(chat_id)
+        if chat_id is not None
+        else None
+    )
+
+    if (
+        chat_id is None
+        or comparison is None
+        or comparison.product_key != product_key
+        or not comparison.offers
+    ):
+        await callback.answer(
+            "Сравнение устарело — выбери товар ещё раз.",
+            show_alert=True,
+        )
+        return
+
+    cheapest = comparison.offers[0]
+    enabled = await asyncio.to_thread(
+        get_price_history_repository().toggle_alert,
+        chat_id,
+        product_key,
+        comparison.product_title or cheapest.title,
+        comparison.query or comparison.product_title,
+        float(cheapest.price),
+        cheapest.currency,
+    )
+    await callback.answer(
+        (
+            "Уведомление включено. Сообщу, когда цена станет ниже."
+            if enabled
+            else "Уведомление отключено."
+        ),
+        show_alert=True,
     )
 
 
@@ -403,12 +524,20 @@ async def load_product_comparison(
             comparison=comparison,
         )
 
+    await asyncio.to_thread(
+        get_price_history_repository().record_offers,
+        product_key,
+        comparison.product_title,
+        comparison.offers,
+    )
+
     await show_comparison(
         message=message,
         offers=comparison.offers,
         source_statuses=(
             comparison.source_statuses
         ),
+        product_key=product_key,
     )
 
 
@@ -1475,6 +1604,7 @@ async def show_comparison(
     source_statuses: (
         list[SourceSearchStatus] | None
     ) = None,
+    product_key: str | None = None,
 ) -> None:
     """Показывает сравнение площадок."""
 
@@ -1578,7 +1708,110 @@ async def show_comparison(
     await message.edit_text(
         "\n".join(lines),
         disable_web_page_preview=True,
+        reply_markup=(
+            build_price_tracking_keyboard(product_key)
+            if product_key
+            else None
+        ),
     )
+
+
+def build_price_tracking_keyboard(
+    product_key: str,
+) -> InlineKeyboardMarkup:
+    """Добавляет историю цены и подписку на снижение."""
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📉 История цены",
+                    callback_data=f"price_history:{product_key}",
+                ),
+                InlineKeyboardButton(
+                    text="🔔 Следить за ценой",
+                    callback_data=f"price_alert:{product_key}",
+                ),
+            ]
+        ]
+    )
+
+
+async def check_price_alerts(bot: Bot) -> None:
+    """Один раз проверяет все активные подписки."""
+
+    repository = get_price_history_repository()
+    alerts = await asyncio.to_thread(repository.active_alerts)
+    comparisons: dict[str, ComparisonResult | None] = {}
+
+    for alert in alerts:
+        if alert.product_key not in comparisons:
+            try:
+                comparison = (
+                    await price_service.search_all_sources_by_onliner_key(
+                        alert.product_key
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "Price alert check failed: product=%s",
+                    alert.product_key,
+                )
+                comparisons[alert.product_key] = None
+            else:
+                comparisons[alert.product_key] = comparison
+                await asyncio.to_thread(
+                    repository.record_offers,
+                    alert.product_key,
+                    comparison.product_title or alert.title,
+                    comparison.offers,
+                )
+
+        comparison = comparisons[alert.product_key]
+
+        if comparison is None:
+            continue
+
+        if not comparison.offers:
+            await asyncio.to_thread(repository.mark_checked, alert)
+            continue
+
+        cheapest = comparison.offers[0]
+        current_price = float(cheapest.price)
+
+        if current_price < alert.last_notified_price:
+            await bot.send_message(
+                chat_id=alert.chat_id,
+                text=(
+                    "🔔 Цена снизилась\n\n"
+                    f"📱 {display_product_title(alert.title)}\n"
+                    f"💰 Было: {alert.last_notified_price:.2f} "
+                    f"{alert.currency}\n"
+                    f"✅ Стало: {current_price:.2f} "
+                    f"{cheapest.currency} — "
+                    f"{cheapest.seller or cheapest.source}\n"
+                    f"🔗 {cheapest.url}"
+                ),
+                disable_web_page_preview=True,
+            )
+            await asyncio.to_thread(
+                repository.mark_checked,
+                alert,
+                current_price,
+            )
+        else:
+            await asyncio.to_thread(repository.mark_checked, alert)
+
+
+async def run_price_alert_loop(
+    bot: Bot,
+    interval_seconds: int,
+) -> None:
+    """Периодически проверяет снижение цен до остановки бота."""
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        await check_price_alerts(bot)
 
 
 def format_source_status(
@@ -1648,7 +1881,9 @@ def format_comparison_diagnostics(
     reason_labels = {
         "accessory": "аксессуар",
         "brand": "производитель",
+        "bundle": "комплектация",
         "color": "цвет",
+        "condition": "состояние товара",
         "memory": "память",
         "model_code": "артикул",
         "model_number": "номер модели",
