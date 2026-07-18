@@ -66,7 +66,8 @@ _COLOR_PATTERNS = (
     (
         "dark_blue",
         re.compile(
-            r"\b(?:dark\s+blue|deep\s+blue|navy|темно[-\s]+син\w*)\b",
+            r"\b(?:dark\s+blue|deep\s+blue|navy|"
+            r"темно[-\s]+син\w*|глубок\w*[-\s]+син\w*)\b",
             re.I,
         ),
     ),
@@ -234,6 +235,7 @@ _GENERIC_COLOR_LABELS = {
     "коричневый": "Brown",
     "бирюзовый": "Turquoise",
     "темно-синий": "Dark Blue",
+    "глубокий синий": "Deep Blue",
     "темно-зеленый": "Dark Green",
     "природный титан": "Natural Titanium",
     "пустынный титан": "Desert Titanium",
@@ -261,6 +263,7 @@ _OFFICIAL_COLOR_LABELS = (
             "оранжевый": "Cosmic Orange",
             "синий": "Deep Blue",
             "темно-синий": "Deep Blue",
+            "глубокий синий": "Deep Blue",
             "серебристый": "Silver",
         },
     ),
