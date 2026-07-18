@@ -1883,12 +1883,14 @@ def format_comparison_diagnostics(
         "brand": "производитель",
         "bundle": "комплектация",
         "color": "цвет",
+        "configuration": "комплектация устройства",
         "condition": "состояние товара",
         "memory": "память",
         "model_code": "артикул",
         "model_number": "номер модели",
         "sim": "SIM-конфигурация",
         "version": "версия модели",
+        "year": "год модели",
     }
     product_title = comparison.product_title
 
