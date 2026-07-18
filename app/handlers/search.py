@@ -1,6 +1,6 @@
 import logging
 import secrets
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 
 from aiogram import F, Router
@@ -19,6 +19,7 @@ from app.models.category import ProductCategory
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import (
+    ComparisonResult,
     SourceSearchStatus,
 )
 from app.services.price_service import PriceService
@@ -45,6 +46,7 @@ logger = logging.getLogger(__name__)
 PRODUCT_PAGE_SIZE = 10
 CATEGORY_PAGE_SIZE = 10
 MAX_SEARCH_SESSIONS = 100
+MAX_DIAGNOSTIC_SESSIONS = 1_000
 product_searches: OrderedDict[
     str,
     list[ProductCandidate],
@@ -67,6 +69,35 @@ category_searches: OrderedDict[
     str,
     CategorySearchSession,
 ] = OrderedDict()
+comparison_diagnostics: OrderedDict[
+    int,
+    ComparisonResult,
+] = OrderedDict()
+
+
+@router.message(Command("diagnostics", "debug"))
+async def handle_diagnostics(message: Message) -> None:
+    """Показывает диагностику последнего сравнения в чате."""
+
+    chat_id = message_chat_id(message)
+    comparison = (
+        comparison_diagnostics.get(chat_id)
+        if chat_id is not None
+        else None
+    )
+
+    if comparison is None:
+        await message.answer(
+            "Диагностики пока нет.\n\n"
+            "Сначала выбери конкретный товар и дождись "
+            "сравнения цен."
+        )
+        return
+
+    await message.answer(
+        format_comparison_diagnostics(comparison),
+        disable_web_page_preview=True,
+    )
 
 
 @router.message(Command("onliner"))
@@ -363,6 +394,14 @@ async def load_product_comparison(
             "Произошла непредвиденная ошибка."
         )
         return
+
+    chat_id = message_chat_id(message)
+
+    if chat_id is not None:
+        store_comparison_diagnostics(
+            chat_id=chat_id,
+            comparison=comparison,
+        )
 
     await show_comparison(
         message=message,
@@ -1569,6 +1608,118 @@ def format_source_status(
         f"➖ {status.source} — "
         "точная модель не найдена"
     )
+
+
+def message_chat_id(message: Message) -> int | None:
+    """Безопасно получает идентификатор Telegram-чата."""
+
+    chat = getattr(message, "chat", None)
+    chat_id = getattr(chat, "id", None)
+    return chat_id if isinstance(chat_id, int) else None
+
+
+def store_comparison_diagnostics(
+    chat_id: int,
+    comparison: ComparisonResult,
+) -> None:
+    """Сохраняет последний отчёт отдельно для каждого чата."""
+
+    comparison_diagnostics[chat_id] = comparison
+    comparison_diagnostics.move_to_end(chat_id)
+
+    while (
+        len(comparison_diagnostics)
+        > MAX_DIAGNOSTIC_SESSIONS
+    ):
+        comparison_diagnostics.popitem(last=False)
+
+
+def format_comparison_diagnostics(
+    comparison: ComparisonResult,
+) -> str:
+    """Формирует компактный технический отчёт поиска."""
+
+    state_labels = {
+        "found": ("✅", "найдено"),
+        "filtered": ("⚠️", "варианты отфильтрованы"),
+        "not_found": ("➖", "не найдено"),
+        "unavailable": ("❌", "недоступен"),
+    }
+    reason_labels = {
+        "accessory": "аксессуар",
+        "brand": "производитель",
+        "color": "цвет",
+        "memory": "память",
+        "model_code": "артикул",
+        "model_number": "номер модели",
+        "sim": "SIM-конфигурация",
+        "version": "версия модели",
+    }
+    product_title = comparison.product_title
+
+    if not product_title and comparison.offers:
+        product_title = comparison.offers[0].title
+
+    lines = [
+        "🧪 Диагностика последнего сравнения",
+        f"📱 {display_product_title(product_title) or 'Не определён'}",
+    ]
+
+    if comparison.query:
+        lines.append(f"🔎 Запрос: {comparison.query}")
+
+    if comparison.completed_at:
+        lines.append(f"🕒 Завершено: {comparison.completed_at}")
+
+    lines.extend(
+        [
+            (
+                "⏱ Общее время: "
+                f"{comparison.duration_seconds:.2f} с"
+            ),
+            f"🏷 Предложений в результате: {len(comparison.offers)}",
+            "",
+            "Источники:",
+        ]
+    )
+
+    for status in comparison.source_statuses:
+        icon, state_label = state_labels.get(
+            status.state,
+            ("❔", status.state),
+        )
+        lines.extend(
+            [
+                (
+                    f"{icon} {status.source} — {state_label}; "
+                    f"{status.duration_seconds:.2f} с"
+                ),
+                (
+                    "   Проверено: "
+                    f"{status.checked_candidates}; "
+                    f"совпало: {status.matched_offers}"
+                ),
+            ]
+        )
+
+    rejected_reasons = Counter(
+        decision.reason
+        for decision in comparison.match_decisions
+        if not decision.accepted
+    )
+    lines.extend(["", "Причины фильтрации:"])
+
+    if rejected_reasons:
+        lines.extend(
+            f"• {reason_labels.get(reason, reason)}: {count}"
+            for reason, count in sorted(rejected_reasons.items())
+        )
+    else:
+        lines.append("• Отфильтрованных вариантов нет")
+
+    return "\n".join(lines)
+
+
 def build_five_element_keyboard(
     products: list[ProductCandidate],
 ) -> InlineKeyboardMarkup:
