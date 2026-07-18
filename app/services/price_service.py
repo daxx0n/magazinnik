@@ -17,6 +17,7 @@ from app.models.search_result import (
     SourceSearchStatus,
 )
 from app.sources import ProductNotFoundError
+from app.sources.electrosila import ElectrosilaSource
 from app.sources.five_element import (
     FiveElementSource,
 )
@@ -43,6 +44,7 @@ class PriceService:
     """Сервис поиска и сравнения цен."""
 
     _aggregate_search_limit = 100
+    _electrosila_search_limit = 30
     _source_search_cache_ttl = 30.0
     _source_search_cache_size = 256
     _candidate_cache_size = 20_000
@@ -68,6 +70,8 @@ class PriceService:
         )
 
         self._shop_by_source = ShopBySource()
+
+        self._electrosila_source = ElectrosilaSource()
 
         self._source_search_cache: OrderedDict[
             tuple[str, str, int],
@@ -284,6 +288,12 @@ class PriceService:
                     canonical_title=canonical_title,
                 )
             ),
+            self._timed_result(
+                self._search_electrosila_query(
+                    query=cross_source_query,
+                    canonical_title=canonical_title,
+                )
+            ),
         )
 
         if selected_candidate is not None:
@@ -292,6 +302,7 @@ class PriceService:
                 (five_result, five_duration),
                 (twenty_one_result, twenty_one_duration),
                 (shop_by_result, shop_by_duration),
+                (electrosila_result, electrosila_duration),
             ) = await asyncio.gather(
                 self._timed_result(
                     self.search_onliner_key(product_key)
@@ -332,6 +343,7 @@ class PriceService:
                 (five_result, five_duration),
                 (twenty_one_result, twenty_one_duration),
                 (shop_by_result, shop_by_duration),
+                (electrosila_result, electrosila_duration),
             ) = await asyncio.gather(
                 *external_searches,
             )
@@ -352,6 +364,11 @@ class PriceService:
             ("5 элемент", five_result, five_duration),
             ("21vek", twenty_one_result, twenty_one_duration),
             ("Shop.by", shop_by_result, shop_by_duration),
+            (
+                "Электросила",
+                electrosila_result,
+                electrosila_duration,
+            ),
         ):
             if isinstance(result, BaseException):
                 logger.warning(
@@ -586,24 +603,41 @@ class PriceService:
             canonical_title=canonical_title,
         )
 
+    async def _search_electrosila_query(
+        self,
+        query: str,
+        canonical_title: str,
+    ) -> list[ProductOffer]:
+        """Ищет Электросилу по модели и вариантам цвета."""
+
+        return await self._search_offer_source_by_query(
+            source=self._electrosila_source,
+            query=query,
+            canonical_title=canonical_title,
+            limit=self._electrosila_search_limit,
+        )
+
     async def _search_offer_source_by_query(
         self,
         source,
         query: str,
         canonical_title: str,
+        limit: int | None = None,
     ) -> list[ProductOffer]:
         """Объединяет выдачу источника по вариантам цвета."""
+
+        search_limit = limit or self._aggregate_search_limit
 
         search_results = await asyncio.gather(
             *(
                 self._cached_source_search(
                     source_name=f"{source.source_name}_offers",
                     query=source_query,
-                    limit=self._aggregate_search_limit,
+                    limit=search_limit,
                     loader=partial(
                         source.find_offers,
                         query=source_query,
-                        limit=self._aggregate_search_limit,
+                        limit=search_limit,
                     ),
                 )
                 for source_query in self._build_source_queries(
