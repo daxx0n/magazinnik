@@ -52,6 +52,13 @@ def comparison_result() -> ComparisonResult:
                 state="unavailable",
                 duration_seconds=2.01,
             ),
+            SourceSearchStatus(
+                source="Электросила",
+                state="found",
+                matched_offers=1,
+                checked_candidates=3,
+                duration_seconds=1.21,
+            ),
         ],
         match_decisions=[
             MatchDecision(
@@ -94,6 +101,7 @@ class DiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Проверено: 5; совпало: 1", text)
         self.assertIn("⚠️ 5 элемент — варианты отфильтрованы", text)
         self.assertIn("❌ Shop.by — недоступен", text)
+        self.assertIn("✅ Электросила — найдено", text)
         self.assertIn("• аксессуар: 1", text)
         self.assertIn("• цвет: 1", text)
         self.assertIn("• память: 1", text)
