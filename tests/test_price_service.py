@@ -145,6 +145,16 @@ class ModelMatchingTest(unittest.TestCase):
                 "Apple iPhone 17 512GB Black",
                 "sim",
             ),
+            (
+                "Apple iPhone 17 Pro 256GB Deep Blue",
+                "Apple iPhone 17 Pro 256GB Deep Blue Refurbished",
+                "condition",
+            ),
+            (
+                "Sony PlayStation 5 Slim",
+                "Sony PlayStation 5 Slim + геймпад DualSense",
+                "bundle",
+            ),
         ]
 
         for canonical, candidate, reason in cases:
@@ -206,6 +216,91 @@ class ModelMatchingTest(unittest.TestCase):
                         candidate,
                     )
                 )
+
+    def test_accepts_regional_and_wildcard_model_codes(self) -> None:
+        cases = [
+            (
+                "Samsung Galaxy S24 Ultra SM-S928B 256GB",
+                "Samsung Galaxy S24 Ultra SM-S928BZKDEUC 256GB",
+                "Samsung SM-S928B 256GB",
+            ),
+            (
+                "Sony PlayStation 5 Slim CFI-21XX "
+                "(2 ревизия, с дисководом)",
+                "Sony PlayStation 5 Slim CFI-2116A",
+                "Sony PlayStation 5 Slim",
+            ),
+            (
+                "Sony PlayStation 5 Slim CFI-21XX "
+                "(2 ревизия, с дисководом)",
+                "Sony PlayStation 5 Slim CFI-2116 A01Y",
+                "Sony PlayStation 5 Slim",
+            ),
+        ]
+
+        for canonical, candidate, requested in cases:
+            with self.subTest(candidate=candidate):
+                self.assertIsNone(
+                    PriceService._model_mismatch_reason(
+                        canonical,
+                        candidate,
+                        requested_title=requested,
+                    )
+                )
+
+        self.assertEqual(
+            PriceService._model_mismatch_reason(
+                "Sony PlayStation 5 Slim CFI-21XX "
+                "(2 ревизия, с дисководом)",
+                "Sony PlayStation 5 Slim CFI-2000A01",
+                requested_title="Sony PlayStation 5 Slim",
+            ),
+            "model_code",
+        )
+        self.assertEqual(
+            PriceService._model_mismatch_reason(
+                "Устройство Bosch ABC123",
+                "Устройство Bosch ABC123PRO",
+                requested_title="Bosch ABC123",
+            ),
+            "model_code",
+        )
+
+    def test_keeps_product_conditions_and_bundles_distinct(self) -> None:
+        cases = [
+            (
+                "Apple iPhone 17 Pro 256GB",
+                "Apple iPhone 17 Pro 256GB восстановленный",
+            ),
+            (
+                "Apple iPhone 17 Pro 256GB Refurbished",
+                "Apple iPhone 17 Pro 256GB",
+            ),
+            (
+                "Sony PlayStation 5 Slim",
+                "Sony PlayStation 5 Slim + геймпад DualSense",
+            ),
+            (
+                "Sony PlayStation 5 Slim + геймпад DualSense",
+                "Sony PlayStation 5 Slim",
+            ),
+        ]
+
+        for canonical, candidate in cases:
+            with self.subTest(candidate=candidate):
+                self.assertIsNotNone(
+                    PriceService._model_mismatch_reason(
+                        canonical,
+                        candidate,
+                    )
+                )
+
+        self.assertIsNone(
+            PriceService._model_mismatch_reason(
+                "Apple iPhone 17 Pro Nano-SIM + eSIM 256GB",
+                "Apple iPhone 17 Pro Nano-SIM + eSIM 256GB",
+            )
+        )
 
     def test_rejects_accessories_for_a_device(self) -> None:
         cases = [
