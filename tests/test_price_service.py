@@ -8,8 +8,14 @@ class ModelMatchingTest(unittest.TestCase):
         cases = [
             ("Samsung", True),
             ("Apple iPhone", True),
+            ("Huawei", True),
+            ("Bosch", True),
+            ("LG", True),
+            ("Sony", True),
+            ("Dyson", True),
             ("Samsung Galaxy S25", False),
             ("Bosch HBA534EB3", False),
+            ("DeLonghi ECAM 22.110.B", False),
         ]
 
         for query, expected in cases:
