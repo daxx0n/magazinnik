@@ -1,13 +1,17 @@
 import unittest
 from unittest.mock import AsyncMock
 
+from app.models.category import ProductCategory
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import SourceSearchStatus
 from app.handlers.search import (
+    build_category_keyboard,
     build_product_keyboard,
+    format_category_page_text,
     format_product_page_text,
     format_source_status,
+    product_search_parents,
 )
 from app.services.price_service import PriceService
 from app.sources import ProductNotFoundError
@@ -235,6 +239,58 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             "Нашёл вариантов: 23.\n"
             "Страница 2 из 3.\n\n"
             "Выбери точную модель:",
+        )
+
+    def test_paginates_categories_and_returns_from_products(self) -> None:
+        categories = [
+            ProductCategory(
+                key=f"category-{index}",
+                title=f"Категория {index}",
+            )
+            for index in range(23)
+        ]
+
+        keyboard = build_category_keyboard(
+            categories=categories,
+            search_id="categories",
+            page=1,
+        )
+        rows = keyboard.inline_keyboard
+
+        self.assertEqual(rows[0][0].callback_data, "olc:categories:10")
+        self.assertEqual(
+            [button.text for button in rows[-1]],
+            ["⏮ В начало", "⬅️ Назад", "Далее ➡️"],
+        )
+        self.assertEqual(
+            format_category_page_text("Samsung", 23, 1),
+            "Запрос «Samsung» относится к нескольким "
+            "категориям.\n"
+            "Страница 2 из 3.\n\n"
+            "Сначала выбери тип товара:",
+        )
+
+        products = [
+            ProductCandidate(
+                key="model",
+                title="Model",
+                url="https://example.com/model",
+            )
+        ]
+        product_search_parents["products"] = ("categories", 1)
+
+        try:
+            product_keyboard = build_product_keyboard(
+                products=products,
+                search_id="products",
+                page=0,
+            )
+        finally:
+            product_search_parents.pop("products", None)
+
+        self.assertEqual(
+            product_keyboard.inline_keyboard[-1][0].callback_data,
+            "olcp:categories:1",
         )
 
     async def test_continues_when_onliner_has_no_offers(self) -> None:
