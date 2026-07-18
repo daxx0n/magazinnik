@@ -12,6 +12,7 @@ from app.handlers.search import (
     format_product_page_text,
     format_source_status,
     product_search_parents,
+    show_comparison,
 )
 from app.services.price_service import PriceService
 from app.sources import ProductNotFoundError
@@ -88,7 +89,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                     "limit": 100,
                 },
                 {
-                    "query": "Apple iPhone 17 512GB black",
+                    "query": "Apple iPhone 17 512GB Black",
                     "limit": 100,
                 },
                 {
@@ -127,7 +128,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                     "limit": 100,
                 },
                 {
-                    "query": "Apple iPhone 17 512GB black",
+                    "query": "Apple iPhone 17 512GB Black",
                     "limit": 100,
                 },
                 {
@@ -166,7 +167,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                     "limit": 100,
                 },
                 {
-                    "query": "Apple iPhone 17 512GB black",
+                    "query": "Apple iPhone 17 512GB Black",
                     "limit": 100,
                 },
                 {
@@ -199,6 +200,52 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 ("5 элемент", 1300),
             ],
         )
+
+    async def test_renders_sorted_source_comparison_and_colors(
+        self,
+    ) -> None:
+        offers = [
+            ProductOffer(
+                source=source,
+                title=(
+                    "Apple iPhone 17 512GB (синий)"
+                    if source == "Onliner"
+                    else "Apple iPhone 17 512GB Mist Blue"
+                ),
+                price=price,
+                currency="BYN",
+                available=True,
+                url=f"https://example.com/{index}",
+                seller=("Seller" if source == "Onliner" else source),
+            )
+            for index, (source, price) in enumerate(
+                [
+                    ("Shop.by", 3400),
+                    ("Onliner", 3500),
+                    ("21vek", 3600),
+                    ("5 элемент", 3700),
+                ]
+            )
+        ]
+        message = AsyncMock()
+
+        await show_comparison(message, offers)
+
+        text = message.edit_text.await_args.args[0]
+        self.assertIn("Найдено предложений: 4", text)
+        self.assertIn(
+            "📱 Apple iPhone 17 512GB (Mist Blue)",
+            text,
+        )
+        self.assertLess(
+            text.index("1. Shop.by"),
+            text.index("2. Onliner"),
+        )
+        self.assertLess(
+            text.index("2. Onliner"),
+            text.index("3. 21vek"),
+        )
+        self.assertEqual(text.count("🔗 https://example.com/"), 4)
 
     def test_paginates_product_variants(self) -> None:
         products = [
