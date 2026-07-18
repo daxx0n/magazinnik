@@ -10,4 +10,6 @@ onliner_positions.json
 data/21vek_product.html
 data/21vek_diagnostics.json
 data/search_diagnostics_*.json
+data/*.sqlite3
+data/*.sqlite3-*
 *.log
