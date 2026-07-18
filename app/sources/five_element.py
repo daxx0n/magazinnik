@@ -1,4 +1,5 @@
 import re
+from collections import OrderedDict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
@@ -29,6 +30,7 @@ class FiveElementSource:
     _search_strategy = (
         "advanced_xname,zero_queries"
     )
+    _candidate_cache_size = 5_000
 
     _allowed_hosts = {
         "5element.by",
@@ -54,7 +56,10 @@ class FiveElementSource:
     )
 
     def __init__(self) -> None:
-        self._candidate_urls: dict[str, str] = {}
+        self._candidate_urls: OrderedDict[
+            str,
+            str,
+        ] = OrderedDict()
 
     async def find_products(
         self,
@@ -148,15 +153,25 @@ class FiveElementSource:
             if candidate is None:
                 continue
 
-            self._candidate_urls[candidate.key] = (
-                candidate.url
-            )
+            self._remember_candidate(candidate)
             candidates.append(candidate)
 
             if len(candidates) >= limit:
                 break
 
         return candidates
+
+    def _remember_candidate(
+        self,
+        candidate: ProductCandidate,
+    ) -> None:
+        """Хранит ограниченный индекс URL поисковых карточек."""
+
+        self._candidate_urls[candidate.key] = candidate.url
+        self._candidate_urls.move_to_end(candidate.key)
+
+        while len(self._candidate_urls) > self._candidate_cache_size:
+            self._candidate_urls.popitem(last=False)
 
     async def search_by_key(
         self,
