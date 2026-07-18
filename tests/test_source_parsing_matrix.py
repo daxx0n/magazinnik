@@ -74,6 +74,25 @@ class SourceParsingMatrixTest(unittest.TestCase):
                 self.assertEqual(candidate.title, title)
                 self.assertEqual(candidate.key, product_id)
 
+    def test_five_element_preserves_selected_model_parameter(self) -> None:
+        source = FiveElementSource()
+
+        self.assertEqual(
+            source._validate_url(
+                "https://5element.by/products/"
+                "playstation-5-pro-ps5-pro-digital?model=368196"
+            ),
+            "https://5element.by/products/"
+            "playstation-5-pro-ps5-pro-digital?model=368196",
+        )
+        self.assertEqual(
+            source._validate_url(
+                "https://5element.by/products/phone"
+                "?model=12345&utm_source=test"
+            ),
+            "https://5element.by/products/phone?model=12345",
+        )
+
     def test_twenty_one_vek_keeps_available_model_offers(self) -> None:
         source = TwentyOneVekSource()
         cases = [
