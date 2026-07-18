@@ -4,6 +4,21 @@ from app.services.price_service import PriceService
 
 
 class ModelMatchingTest(unittest.TestCase):
+    def test_detects_only_broad_catalog_queries(self) -> None:
+        cases = [
+            ("Samsung", True),
+            ("Apple iPhone", True),
+            ("Samsung Galaxy S25", False),
+            ("Bosch HBA534EB3", False),
+        ]
+
+        for query, expected in cases:
+            with self.subTest(query=query):
+                self.assertEqual(
+                    PriceService.should_categorize_query(query),
+                    expected,
+                )
+
     def test_builds_query_without_color(self) -> None:
         self.assertEqual(
             PriceService._build_cross_source_query(
