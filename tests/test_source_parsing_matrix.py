@@ -1,5 +1,6 @@
 import unittest
 
+from app.sources.electrosila import ElectrosilaSource
 from app.sources.five_element import FiveElementSource
 from app.sources.onliner import OnlinerSource
 from app.sources.twenty_one_vek import TwentyOneVekSource
@@ -103,6 +104,35 @@ class SourceParsingMatrixTest(unittest.TestCase):
                 assert offer is not None
                 self.assertEqual(offer.title, title)
                 self.assertEqual(offer.price, 4599.0)
+
+    def test_electrosila_keeps_titles_and_prices(self) -> None:
+        source = ElectrosilaSource()
+        cases = [
+            (
+                "Смартфон APPLE iPhone 17 Pro 12GB/256GB "
+                "MG8J4KH/A (Deep Blue)",
+                "4 899 . 00 р",
+            ),
+            ("Духовой шкаф BOSCH HBA534EB3", "1 599 . 90 р"),
+            ("Телевизор SAMSUNG UE43U8000FUXRU", "1 299 . 00 р"),
+        ]
+
+        for index, (title, price) in enumerate(cases):
+            with self.subTest(title=title):
+                html = f"""
+                <div class="tov_prew_search">
+                  <a href="https://sila.by/catalog/category/item-{index}">
+                    <img alt="{title}">
+                  </a>
+                  <div class="btn_zak">В КОРЗИНУ!</div>
+                  <div class="price">{price}</div>
+                </div>
+                """
+                offers = source._parse_search_results(html, limit=1)
+
+                self.assertEqual(len(offers), 1)
+                self.assertEqual(offers[0].title, title)
+                self.assertGreater(offers[0].price, 0)
 
 
 if __name__ == "__main__":
