@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.models.category import ProductCategory
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.sources import (
@@ -49,10 +50,124 @@ class OnlinerSource:
         pool=10.0,
     )
 
+    _category_discovery_pages = 12
+    _accessory_categories = {
+        "cable",
+        "chargersmobile",
+        "phonecase",
+        "protectiveglass",
+        "screenprotector",
+        "watchband",
+    }
+    _category_titles = {
+        "activitytracker": "Фитнес-браслеты",
+        "conditioner": "Кондиционеры",
+        "dishwasher": "Посудомоечные машины",
+        "ebook": "Электронные книги",
+        "headphones": "Наушники",
+        "hob_cooker": "Варочные панели",
+        "keyboard": "Клавиатуры",
+        "microwave": "Микроволновые печи",
+        "mobile": "Телефоны и смартфоны",
+        "monitor": "Мониторы",
+        "mouse": "Мыши",
+        "multifunctional": "МФУ",
+        "notebook": "Ноутбуки",
+        "oven_cooker": "Духовые шкафы",
+        "portablecharger": "Внешние аккумуляторы",
+        "printer": "Принтеры",
+        "refrigerator": "Холодильники",
+        "smartwatch": "Умные часы",
+        "soundbar": "Саундбары",
+        "tabletpc": "Планшеты",
+        "tv": "Телевизоры",
+        "vacuumcleaner": "Пылесосы",
+        "washingmachine": "Стиральные машины",
+    }
+
+    async def find_categories(
+        self,
+        query: str,
+    ) -> list[ProductCategory]:
+        """Находит товарные разделы для широкого запроса."""
+
+        normalized_query = " ".join(query.strip().split())
+
+        if len(normalized_query) < 3:
+            return []
+
+        categories: dict[str, ProductCategory] = {}
+        query_brand_key = self._normalize_brand_key(
+            normalized_query
+        )
+        page = 1
+        last_page = self._category_discovery_pages
+
+        async with self._create_client() as client:
+            while page <= min(
+                last_page,
+                self._category_discovery_pages,
+            ):
+                data = await self._request_json(
+                    client=client,
+                    url=self._search_endpoint,
+                    params={
+                        "query": normalized_query,
+                        "page": str(page),
+                    },
+                )
+                raw_products = data.get("products", [])
+
+                if not isinstance(raw_products, list) or not raw_products:
+                    break
+
+                last_page = self._last_page(
+                    data=data,
+                    fallback=page,
+                )
+
+                for raw_product in raw_products:
+                    if not isinstance(raw_product, dict):
+                        continue
+
+                    candidate = self._parse_candidate(raw_product)
+
+                    if candidate is None:
+                        continue
+
+                    if self._product_brand_key(candidate.url) != (
+                        query_brand_key
+                    ):
+                        continue
+
+                    category_key = self._product_category_key(
+                        raw_product,
+                        candidate,
+                    )
+
+                    if (
+                        not category_key
+                        or category_key in self._accessory_categories
+                    ):
+                        continue
+
+                    categories.setdefault(
+                        category_key,
+                        ProductCategory(
+                            key=category_key,
+                            title=self._category_title(category_key),
+                        ),
+                    )
+
+                page += 1
+
+        return list(categories.values())
+
     async def find_products(
         self,
         query: str,
         limit: int | None = None,
+        category: str | None = None,
     ) -> list[ProductCandidate]:
         """Ищет карточки Onliner по названию товара."""
 
@@ -65,9 +180,11 @@ class OnlinerSource:
 
         candidates: list[ProductCandidate] = []
         used_keys: set[str] = set()
-        primary_category: str | None = None
+        primary_category = category
         pages_without_primary_products = 0
+        primary_category_seen = False
         page = 1
+        last_page = 100
 
         async with self._create_client() as client:
             while page <= 100:
@@ -90,6 +207,11 @@ class OnlinerSource:
                 ):
                     break
 
+                last_page = self._last_page(
+                    data=data,
+                    fallback=page,
+                )
+
                 added_on_page = 0
 
                 for raw_product in raw_products:
@@ -107,8 +229,9 @@ class OnlinerSource:
                         continue
 
                     candidate_category = (
-                        self._extract_category(
-                            candidate.url
+                        self._product_category_key(
+                            raw_product,
+                            candidate,
                         )
                     )
 
@@ -124,6 +247,7 @@ class OnlinerSource:
                     used_keys.add(candidate.key)
                     candidates.append(candidate)
                     added_on_page += 1
+                    primary_category_seen = True
 
                     if (
                         limit is not None
@@ -133,19 +257,24 @@ class OnlinerSource:
                             candidates
                         )
 
-                if added_on_page == 0:
+                if added_on_page == 0 and primary_category_seen:
                     pages_without_primary_products += 1
                 else:
                     pages_without_primary_products = 0
 
                 # Поиск Onliner после основных товаров может
                 # продолжаться аксессуарами других категорий.
-                # Две страницы без основной категории означают,
+                # Несколько страниц без основной категории означают,
                 # что релевантная часть выдачи закончилась.
-                if pages_without_primary_products >= 2:
+                empty_page_limit = 3 if category else 2
+
+                if pages_without_primary_products >= empty_page_limit:
                     break
 
                 page += 1
+
+                if page > last_page:
+                    break
 
         grouped_candidates = self._group_variants(
             candidates
@@ -167,6 +296,76 @@ class OnlinerSource:
         ]
 
         return path_parts[0] if path_parts else ""
+
+    @staticmethod
+    def _product_brand_key(product_url: str) -> str:
+        """Получает производителя из URL карточки."""
+
+        path_parts = [
+            part
+            for part in urlparse(product_url).path.split("/")
+            if part
+        ]
+
+        if len(path_parts) < 2:
+            return ""
+
+        return OnlinerSource._normalize_brand_key(path_parts[1])
+
+    @staticmethod
+    def _normalize_brand_key(value: str) -> str:
+        """Нормализует бренд для сравнения с URL каталога."""
+
+        return re.sub(
+            r"[^a-zа-яё0-9]+",
+            "",
+            value.casefold(),
+        )
+
+    @classmethod
+    def _product_category_key(
+        cls,
+        raw_product: dict,
+        candidate: ProductCandidate,
+    ) -> str:
+        """Берёт ключ раздела из API с резервом по URL."""
+
+        raw_schema = raw_product.get("schema")
+
+        if isinstance(raw_schema, dict):
+            schema_key = raw_schema.get("key")
+
+            if isinstance(schema_key, str) and schema_key:
+                return schema_key
+
+        return cls._extract_category(candidate.url)
+
+    @classmethod
+    def _category_title(cls, category_key: str) -> str:
+        """Возвращает понятное название раздела."""
+
+        known_title = cls._category_titles.get(category_key)
+
+        if known_title is not None:
+            return known_title
+
+        return category_key.replace("_", " ").capitalize()
+
+    @staticmethod
+    def _last_page(data: dict, fallback: int) -> int:
+        """Читает число страниц из ответа поиска."""
+
+        raw_page = data.get("page")
+
+        if not isinstance(raw_page, dict):
+            return fallback + 1
+
+        raw_last = raw_page.get("last")
+
+        if not isinstance(raw_last, int) or raw_last < 1:
+            return fallback
+
+        return min(raw_last, 100)
 
     @staticmethod
     def _group_variants(
