@@ -97,6 +97,39 @@ class ShopBySourceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offers, [])
         source._download_search_page.assert_not_awaited()
 
+    async def test_uses_model_card_when_seller_rows_are_absent(
+        self,
+    ) -> None:
+        source = ShopBySource()
+        source._download_search_page = AsyncMock(
+            return_value="""
+            <div class="ModelList__ModelBlock">
+              <a href="/pristavki/sony_playstation_5_pro_2_reviziya/">
+                <span class="ModelList__NameBlock">
+                  Игровая приставка Sony PlayStation 5 Pro
+                  (2 ревизия)
+                </span>
+              </a>
+              <div>от 3 879,03 р.</div>
+              <div>1 предложение</div>
+            </div>
+            """
+        )
+
+        offers = await source.find_offers(
+            "Sony PlayStation 5 Pro",
+            limit=10,
+        )
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, 3879.03)
+        self.assertEqual(offers[0].seller, "Shop.by")
+        self.assertEqual(
+            offers[0].url,
+            "https://shop.by/pristavki/"
+            "sony_playstation_5_pro_2_reviziya/",
+        )
+
     async def test_preserves_model_titles_across_categories(self) -> None:
         cases = [
             "Ноутбук ASUS TUF Gaming A15 FA507NV-LP031",
