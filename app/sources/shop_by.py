@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -127,6 +128,15 @@ class ShopBySource:
             if previous is None or offer.price < previous.price:
                 offers[unique_key] = offer
 
+        if not offers:
+            for offer in self._parse_model_cards(soup):
+                offers[
+                    (
+                        (offer.seller or "").casefold(),
+                        offer.url,
+                    )
+                ] = offer
+
         return sorted(
             offers.values(),
             key=lambda offer: offer.price,
@@ -226,6 +236,124 @@ class ShopBySource:
                 "%d.%m.%Y %H:%M"
             ),
         )
+
+    def _parse_model_cards(
+        self,
+        soup: BeautifulSoup,
+    ) -> list[ProductOffer]:
+        """Использует минимальную цену карточки до выбора продавца."""
+
+        offers: dict[str, ProductOffer] = {}
+        title_elements = soup.select(
+            ".ModelList__NameBlock"
+        )
+
+        if not title_elements:
+            title_elements = [
+                anchor
+                for anchor in soup.select('a[href]')
+                if "/" in str(anchor.get("href", ""))
+            ]
+
+        for title_element in title_elements:
+            anchor = (
+                title_element
+                if title_element.name == "a"
+                else title_element.find_parent("a", href=True)
+            )
+
+            if anchor is None:
+                anchor = title_element.find("a", href=True)
+
+            if anchor is None:
+                continue
+
+            title = " ".join(
+                title_element.get_text(" ", strip=True).split()
+            )
+            model_url = self._model_page_url(
+                str(anchor.get("href", ""))
+            )
+
+            if len(title) < 8 or model_url is None:
+                continue
+
+            price = self._model_card_price(title_element)
+
+            if price is None or price <= 0:
+                continue
+
+            offers.setdefault(
+                model_url,
+                ProductOffer(
+                    source=self.source_name,
+                    title=title,
+                    price=float(price),
+                    currency="BYN",
+                    available=True,
+                    url=model_url,
+                    seller=self.source_name,
+                    availability_text=(
+                        "Предложения доступны на Shop.by"
+                    ),
+                    updated_at=datetime.now().strftime(
+                        "%d.%m.%Y %H:%M"
+                    ),
+                ),
+            )
+
+        return list(offers.values())
+
+    def _model_card_price(self, element) -> Decimal | None:
+        node = element
+
+        for _ in range(6):
+            if node is None:
+                return None
+
+            price_meta = node.select_one(
+                'meta[itemprop="lowPrice"][content], '
+                'meta[itemprop="price"][content]'
+            )
+
+            if price_meta is not None:
+                price = self._parse_decimal(
+                    price_meta.get("content")
+                )
+
+                if price is not None:
+                    return price
+
+            text = node.get_text(" ", strip=True)
+            match = re.search(
+                r"(?:от\s*)?"
+                r"(\d{1,3}(?:[\s\xa0]\d{3})*"
+                r"[,.]\d{2})\s*"
+                r"(?:р(?:уб)?\.?|p\.?)",
+                text,
+                flags=re.IGNORECASE,
+            )
+
+            if match is not None:
+                return self._parse_decimal(match.group(1))
+
+            node = node.parent
+
+        return None
+
+    def _model_page_url(self, raw_link: str) -> str | None:
+        model_url = urljoin(self._base_url, raw_link)
+        parsed = urlparse(model_url)
+
+        if (
+            parsed.scheme not in {"http", "https"}
+            or parsed.hostname not in {"shop.by", "www.shop.by"}
+            or parsed.path in {"", "/"}
+            or parsed.path.startswith(("/find/", "/item.php"))
+        ):
+            return None
+
+        return model_url
 
     def _offer_url(self, raw_link: str) -> str:
         """Достаёт прямую ссылку продавца из редиректа."""
