@@ -3,6 +3,7 @@ import logging
 import re
 from collections.abc import Iterable
 
+from app.models.category import ProductCategory
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import (
@@ -55,6 +56,7 @@ class PriceService:
     async def find_onliner_products(
         self,
         query: str,
+        category: str | None = None,
     ) -> list[ProductCandidate]:
         """Ищет карточки Onliner."""
 
@@ -64,6 +66,7 @@ class PriceService:
             .find_products(
                 query=query,
                 limit=None,
+                category=category,
             )
         )
 
@@ -72,6 +75,31 @@ class PriceService:
             self._onliner_queries[product.key] = query
 
         return products
+
+    async def find_onliner_categories(
+        self,
+        query: str,
+    ) -> list[ProductCategory]:
+        """Находит разделы каталога для широкого запроса."""
+
+        return await self._onliner_source.find_categories(query)
+
+    @staticmethod
+    def should_categorize_query(query: str) -> bool:
+        """Определяет короткий запрос без конкретной модели."""
+
+        tokens = re.findall(
+            r"[a-zа-яё0-9]+",
+            query.casefold(),
+        )
+
+        return (
+            1 <= len(tokens) <= 2
+            and not any(
+                character.isdigit()
+                for character in query
+            )
+        )
 
     async def find_five_element_products(
         self,
