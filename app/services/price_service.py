@@ -15,6 +15,7 @@ from app.sources.five_element import (
     FiveElementSource,
 )
 from app.sources.onliner import OnlinerSource
+from app.sources.shop_by import ShopBySource
 from app.sources.twenty_one_vek import (
     TwentyOneVekSource,
 )
@@ -48,6 +49,8 @@ class PriceService:
         self._twenty_one_vek_source = (
             TwentyOneVekSource()
         )
+
+        self._shop_by_source = ShopBySource()
 
     async def find_onliner_products(
         self,
@@ -197,7 +200,11 @@ class PriceService:
             cross_source_query,
         )
 
-        five_result, twenty_one_result = (
+        (
+            five_result,
+            twenty_one_result,
+            shop_by_result,
+        ) = (
             await asyncio.gather(
                 self._search_five_element_by_query(
                     query=cross_source_query,
@@ -205,6 +212,10 @@ class PriceService:
                     requested_title=requested_query,
                 ),
                 self._search_twenty_one_vek_by_query(
+                    query=cross_source_query,
+                    canonical_title=canonical_title,
+                ),
+                self._search_shop_by_query(
                     query=cross_source_query,
                     canonical_title=canonical_title,
                 ),
@@ -229,6 +240,7 @@ class PriceService:
         for source_name, result in (
             ("5 элемент", five_result),
             ("21vek", twenty_one_result),
+            ("Shop.by", shop_by_result),
         ):
             if isinstance(result, BaseException):
                 logger.warning(
@@ -399,9 +411,36 @@ class PriceService:
     ) -> list[ProductOffer]:
         """Ищет 21vek по модели и вариантам цвета."""
 
+        return await self._search_offer_source_by_query(
+            source=self._twenty_one_vek_source,
+            query=query,
+            canonical_title=canonical_title,
+        )
+
+    async def _search_shop_by_query(
+        self,
+        query: str,
+        canonical_title: str,
+    ) -> list[ProductOffer]:
+        """Ищет Shop.by по модели и вариантам цвета."""
+
+        return await self._search_offer_source_by_query(
+            source=self._shop_by_source,
+            query=query,
+            canonical_title=canonical_title,
+        )
+
+    async def _search_offer_source_by_query(
+        self,
+        source,
+        query: str,
+        canonical_title: str,
+    ) -> list[ProductOffer]:
+        """Объединяет выдачу источника по вариантам цвета."""
+
         search_results = await asyncio.gather(
             *(
-                self._twenty_one_vek_source.find_offers(
+                source.find_offers(
                     query=source_query,
                     limit=self._aggregate_search_limit,
                 )
@@ -421,11 +460,20 @@ class PriceService:
         if not successful_results:
             raise search_results[0]
 
-        unique: dict[str, ProductOffer] = {}
+        unique: dict[
+            tuple[str, str],
+            ProductOffer,
+        ] = {}
 
         for result in successful_results:
             for offer in result:
-                unique.setdefault(offer.url, offer)
+                unique.setdefault(
+                    (
+                        (offer.seller or "").casefold(),
+                        offer.url,
+                    ),
+                    offer,
+                )
 
         return list(unique.values())
 
@@ -904,7 +952,41 @@ class PriceService:
         ):
             return "model_number"
 
+        def sim_configuration(value: str) -> str:
+            compact = re.sub(
+                r"[^a-zа-я0-9+]+",
+                " ",
+                value.casefold().replace("ё", "е"),
+            )
+
+            if re.search(r"\bdual\s+e\s*sim\b", compact):
+                return "dual_esim"
+
+            if re.search(r"\bdual\s+sim\b", compact):
+                return "dual_sim"
+
+            if re.search(
+                r"\b(?:только\s+)?e\s*sim\b",
+                compact,
+            ) and not re.search(
+                r"\b(?:nano\s+)?sim\s*\+\s*e\s*sim\b",
+                compact,
+            ):
+                return "esim_only"
+
+            return "standard"
+
+        if sim_configuration(
+            canonical_title
+        ) != sim_configuration(candidate_title):
+            return "sim"
+
         def version_tokens(value: str) -> set[str]:
+            value = re.sub(
+                r"\be\s+sim\b",
+                " ",
+                value,
+            )
             tokens = set(
                 re.findall(
                     r"[a-zа-я]+|\d+",
