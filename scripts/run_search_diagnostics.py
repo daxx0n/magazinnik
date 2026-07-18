@@ -36,6 +36,23 @@ DEFAULT_QUERIES = [
     "Bosch SMS4HMI07E",
     "DeLonghi ECAM 22.110.B",
     "Sony PlayStation 5 Slim",
+    "Apple iPhone 17 Pro 256GB",
+    "Samsung Galaxy S25 Ultra 256GB",
+    "Xiaomi 14T Pro 512GB",
+    "Google Pixel 9 Pro 256GB",
+    "Huawei Pura 70 Pro 512GB",
+    "Lenovo LOQ 15IRX9",
+    "ASUS TUF Gaming A15 FA507NV",
+    "TCL 55C755",
+    "Samsung WW90T554CAT",
+    "Sony WH-1000XM5",
+    "JBL Flip 6",
+    "Microsoft Xbox Series X",
+    "Nintendo Switch OLED",
+    "Oral-B iO 6",
+    "Apple Watch Series 10 GPS 46mm",
+    "Samsung Galaxy Tab S10 256GB Wi-Fi",
+    "Garmin Forerunner 965",
 ]
 
 
