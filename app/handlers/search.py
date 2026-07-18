@@ -305,8 +305,8 @@ async def load_product_comparison(
     """Загружает сравнение выбранной модификации."""
 
     await message.edit_text(
-        "🔎 Сравниваю цены Onliner, "
-        "21vek и 5 элемента..."
+        "🔎 Сравниваю цены Onliner, 21vek, "
+        "5 элемента и Shop.by..."
     )
 
     try:
