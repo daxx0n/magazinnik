@@ -41,6 +41,10 @@ class ProductVariantsTest(unittest.TestCase):
                 "Cosmic Orange",
             ),
             (
+                "Apple iPhone 17 Pro 256GB (глубокий синий)",
+                "Deep Blue",
+            ),
+            (
                 "Samsung Galaxy S25 (синий)",
                 "Blue",
             ),
@@ -145,6 +149,10 @@ class ProductVariantsTest(unittest.TestCase):
             ),
             (
                 "Apple iPhone 17 Pro (темно-синий)",
+                "dark_blue",
+            ),
+            (
+                "Apple iPhone 17 Pro (глубокий синий)",
                 "dark_blue",
             ),
             (
