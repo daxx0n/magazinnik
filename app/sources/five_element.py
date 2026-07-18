@@ -2,7 +2,7 @@ import re
 from collections import OrderedDict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -280,10 +280,24 @@ class FiveElementSource:
             )
 
         clean_path = parsed_url.path.rstrip("/")
+        model_values = parse_qs(
+            parsed_url.query,
+            keep_blank_values=False,
+        ).get("model", [])
+        model_query = ""
+
+        if (
+            len(model_values) == 1
+            and re.fullmatch(r"\d+", model_values[0])
+        ):
+            # В каталоге 5 элемента один путь может вести на
+            # несколько модификаций. Без model сайт открывает
+            # базовую модель с другим артикулом или без цены.
+            model_query = f"?model={model_values[0]}"
 
         return (
             "https://5element.by"
-            f"{clean_path}"
+            f"{clean_path}{model_query}"
         )
 
     async def _download_page(
