@@ -5,65 +5,212 @@ from app.models.product import ProductCandidate
 
 
 _MEMORY_PATTERN = re.compile(
-    r"\b\d+\s*(?:gb|tb|mb|гб|тб|мб)\b",
+    r"\b(\d+)\s*(gb|tb|mb|гб|тб|мб)\b",
     re.IGNORECASE,
 )
 _MEMORY_PAIR_PATTERN = re.compile(
-    r"\b\d{1,2}\s*/\s*\d{3,4}\b"
+    r"(?<!\d)(\d{1,2})\s*"
+    r"(gb|tb|mb|гб|тб|мб)?\s*/\s*"
+    r"(\d{1,4})\s*"
+    r"(gb|tb|mb|гб|тб|мб)?(?!\w)",
+    re.IGNORECASE,
 )
-_COLOR_MARKERS = (
-    "black",
-    "white",
-    "blue",
-    "green",
-    "yellow",
-    "red",
-    "purple",
-    "pink",
-    "orange",
-    "gray",
-    "grey",
-    "silver",
-    "gold",
-    "graphite",
-    "titanium",
-    "beige",
-    "черн",
-    "бел",
-    "син",
-    "голуб",
-    "зелен",
-    "желт",
-    "красн",
-    "фиолет",
-    "сирен",
-    "лилов",
-    "розов",
-    "оранж",
-    "сер",
-    "серебр",
-    "золот",
-    "графит",
-    "титан",
-    "беж",
-    "коричн",
-    "бирюз",
+_COLOR_PATTERNS = (
+    (
+        "natural_titanium",
+        re.compile(
+            r"\b(?:natural\s+titanium|природн\w*\s+титан\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "desert_titanium",
+        re.compile(
+            r"\b(?:desert\s+titanium|пустынн\w*\s+титан\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "black_titanium",
+        re.compile(
+            r"\b(?:black\s+titanium|черн\w*\s+титан\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "white_titanium",
+        re.compile(
+            r"\b(?:white\s+titanium|бел\w*\s+титан\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "blue_titanium",
+        re.compile(
+            r"\b(?:blue\s+titanium|син\w*\s+титан\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "graphite",
+        re.compile(r"\b(?:graphite|графитов\w*)\b", re.I),
+    ),
+    (
+        "light_blue",
+        re.compile(
+            r"\b(?:light\s+blue|mist\s+blue|sky\s+blue|"
+            r"голуб\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "dark_blue",
+        re.compile(
+            r"\b(?:dark\s+blue|deep\s+blue|navy|темно[-\s]+син\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "turquoise",
+        re.compile(r"\b(?:turquoise|teal|бирюз\w*)\b", re.I),
+    ),
+    (
+        "lavender",
+        re.compile(r"\b(?:lavender|сирен\w*)\b", re.I),
+    ),
+    (
+        "lilac",
+        re.compile(r"\b(?:lilac|лилов\w*)\b", re.I),
+    ),
+    (
+        "black",
+        re.compile(
+            r"\b(?:black|obsidian|space\s+black|черн\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "white",
+        re.compile(
+            r"\b(?:white|porcelain|cloud\s+white|бел\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "blue",
+        re.compile(
+            r"\b(?:blue|син\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "midnight",
+        re.compile(r"\b(?:midnight|полуночн\w*)\b", re.I),
+    ),
+    (
+        "starlight",
+        re.compile(
+            r"\b(?:starlight|сияющ\w*\s+звезд\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "dark_green",
+        re.compile(
+            r"\b(?:dark\s+green|темно[-\s]+зелен\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "green",
+        re.compile(r"\b(?:green|sage|зелен\w*)\b", re.I),
+    ),
+    (
+        "yellow",
+        re.compile(r"\b(?:yellow|желт\w*)\b", re.I),
+    ),
+    (
+        "rose_gold",
+        re.compile(
+            r"\b(?:rose\s+gold|розов\w*\s+золот\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "light_gold",
+        re.compile(
+            r"\b(?:light\s+gold|светло[-\s]+золот\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "gold",
+        re.compile(r"\b(?:gold|золот\w*)\b", re.I),
+    ),
+    (
+        "red",
+        re.compile(r"\b(?:red|красн\w*)\b", re.I),
+    ),
+    (
+        "purple",
+        re.compile(r"\b(?:purple|фиолет\w*)\b", re.I),
+    ),
+    (
+        "pink",
+        re.compile(r"\b(?:pink|розов\w*)\b", re.I),
+    ),
+    (
+        "orange",
+        re.compile(
+            r"\b(?:orange|cosmic\s+orange|оранж\w*)\b",
+            re.I,
+        ),
+    ),
+    (
+        "gray",
+        re.compile(r"\b(?:gray|grey|сер(?:ый|ая|ое|ые))\b", re.I),
+    ),
+    (
+        "silver",
+        re.compile(r"\b(?:silver|серебр\w*)\b", re.I),
+    ),
+    (
+        "beige",
+        re.compile(r"\b(?:beige|беж\w*)\b", re.I),
+    ),
+    (
+        "brown",
+        re.compile(r"\b(?:brown|коричн\w*)\b", re.I),
+    ),
+    (
+        "burgundy",
+        re.compile(r"\b(?:burgundy|бордов\w*)\b", re.I),
+    ),
+    (
+        "cream",
+        re.compile(r"\b(?:cream|кремов\w*)\b", re.I),
+    ),
+    (
+        "bronze",
+        re.compile(r"\b(?:bronze|бронзов\w*)\b", re.I),
+    ),
+    (
+        "copper",
+        re.compile(r"\b(?:copper|медн\w*)\b", re.I),
+    ),
+    (
+        "mint",
+        re.compile(r"\b(?:mint|мятн\w*)\b", re.I),
+    ),
+    (
+        "nickel",
+        re.compile(r"\b(?:nickel|никел\w*)\b", re.I),
+    ),
+    (
+        "titanium",
+        re.compile(r"\b(?:titanium|титан\w*)\b", re.I),
+    ),
 )
-_COLOR_ALIASES = {
-    "black": ("black", "черн", "графит"),
-    "white": ("white", "бел"),
-    "blue": ("blue", "син", "голуб", "бирюз"),
-    "green": ("green", "зелен"),
-    "yellow": ("yellow", "желт"),
-    "gold": ("gold", "золот"),
-    "red": ("red", "красн"),
-    "purple": ("purple", "фиолет", "сирен", "лилов"),
-    "pink": ("pink", "розов"),
-    "orange": ("orange", "оранж"),
-    "gray": ("gray", "grey", "серый", "серая", "серое"),
-    "silver": ("silver", "серебр"),
-    "beige": ("beige", "беж", "коричн"),
-}
 
 _GENERIC_COLOR_LABELS = {
     "черный": "Black",
@@ -88,6 +235,23 @@ _GENERIC_COLOR_LABELS = {
     "бирюзовый": "Turquoise",
     "темно-синий": "Dark Blue",
     "темно-зеленый": "Dark Green",
+    "природный титан": "Natural Titanium",
+    "пустынный титан": "Desert Titanium",
+    "черный титан": "Black Titanium",
+    "белый титан": "White Titanium",
+    "синий титан": "Blue Titanium",
+    "полуночный": "Midnight",
+    "сияющая звезда": "Starlight",
+    "бордовый": "Burgundy",
+    "кремовый": "Cream",
+    "бронзовый": "Bronze",
+    "медный": "Copper",
+    "мятный": "Mint",
+    "никель": "Nickel",
+    "матовый черный": "Matte Black",
+    "космический оранжевый": "Cosmic Orange",
+    "розовое золото": "Rose Gold",
+    "светло-золотистый": "Light Gold",
 }
 
 _OFFICIAL_COLOR_LABELS = (
@@ -136,20 +300,87 @@ class ProductVariantGroup:
 def extract_memory(title: str) -> str | None:
     """Извлекает память или конфигурацию RAM/storage."""
 
-    memory_parts = _MEMORY_PATTERN.findall(title)
+    pair = _find_memory_pair(title)
+
+    if pair is not None:
+        _, memory_parts = pair
+        return "/".join(memory_parts)
+
+    memory_parts = [
+        _normalize_memory_part(amount, unit)
+        for amount, unit in _MEMORY_PATTERN.findall(title)
+    ]
 
     if memory_parts:
         return "/".join(
-            re.sub(r"\s+", "", part).upper()
-            for part in memory_parts
+            sorted(
+                memory_parts,
+                key=_memory_part_size,
+            )
         )
 
-    pair = _MEMORY_PAIR_PATTERN.search(title)
+    return None
 
-    if pair:
-        return re.sub(r"\s+", "", pair.group(0))
+
+def _find_memory_pair(
+    title: str,
+) -> tuple[re.Match[str], list[str]] | None:
+    """Находит RAM/storage, включая запись 8/256GB."""
+
+    for match in _MEMORY_PAIR_PATTERN.finditer(title):
+        left_amount, left_unit, right_amount, right_unit = (
+            match.groups()
+        )
+
+        if (
+            left_unit is None
+            and right_unit is None
+            and int(right_amount) < 32
+        ):
+            continue
+
+        parts = [
+            _normalize_memory_part(
+                left_amount,
+                left_unit or "GB",
+            ),
+            _normalize_memory_part(
+                right_amount,
+                right_unit or "GB",
+            ),
+        ]
+
+        return match, sorted(parts, key=_memory_part_size)
 
     return None
+
+
+def _normalize_memory_part(amount: str, unit: str) -> str:
+    unit_aliases = {
+        "гб": "GB",
+        "тб": "TB",
+        "мб": "MB",
+    }
+    normalized_unit = unit_aliases.get(
+        unit.casefold(),
+        unit.upper(),
+    )
+    return f"{int(amount)}{normalized_unit}"
+
+
+def _memory_part_size(value: str) -> int:
+    match = re.fullmatch(r"(\d+)(MB|GB|TB)", value)
+
+    if match is None:
+        return 0
+
+    amount = int(match.group(1))
+    multiplier = {
+        "MB": 1,
+        "GB": 1024,
+        "TB": 1024 * 1024,
+    }[match.group(2)]
+    return amount * multiplier
 
 
 def extract_color(title: str) -> str | None:
@@ -161,35 +392,9 @@ def extract_color(title: str) -> str | None:
         return None
 
     value = match.group(1).strip()
-    normalized = value.casefold()
+    normalized = " ".join(value.casefold().split())
 
-    if any(
-        marker in normalized
-        for marker in _COLOR_MARKERS
-    ):
-        return value
-
-    # Фирменные названия вроде Obsidian или Porcelain
-    # не всегда содержат обычное название цвета.
-    latin_words = re.findall(r"[a-z]+", normalized)
-    non_color_markers = {
-        "dual",
-        "edition",
-        "esim",
-        "max",
-        "pro",
-        "rev",
-        "sim",
-        "usb",
-        "version",
-        "with",
-    }
-
-    if (
-        1 <= len(latin_words) <= 3
-        and not re.search(r"\d", normalized)
-        and not set(latin_words) & non_color_markers
-    ):
+    if _match_color_key(normalized) is not None:
         return value
 
     return None
@@ -198,10 +403,30 @@ def extract_color(title: str) -> str | None:
 def extract_color_key(title: str) -> str | None:
     """Нормализует русское или английское название цвета."""
 
-    normalized = title.casefold()
+    explicit_color = extract_color(title)
 
-    for color_key, aliases in _COLOR_ALIASES.items():
-        if any(alias in normalized for alias in aliases):
+    if explicit_color is not None:
+        color_key = _match_color_key(
+            display_color(title) or explicit_color
+        )
+
+        if color_key is not None:
+            return color_key
+
+        return "name:" + re.sub(
+            r"[^a-z0-9]+",
+            "_",
+            explicit_color.casefold(),
+        ).strip("_")
+
+    return _match_color_key(title)
+
+
+def _match_color_key(value: str) -> str | None:
+    """Ищет цвет только как отдельное слово или фразу."""
+
+    for color_key, pattern in _COLOR_PATTERNS:
+        if pattern.search(value):
             return color_key
 
     return None
@@ -233,10 +458,24 @@ def display_color(title: str) -> str | None:
             if official_label is not None:
                 return official_label
 
-    return _GENERIC_COLOR_LABELS.get(
-        normalized,
-        color,
-    )
+    direct_label = _GENERIC_COLOR_LABELS.get(normalized)
+
+    if direct_label is not None:
+        return direct_label
+
+    parts = [part.strip() for part in color.split("/")]
+
+    if len(parts) > 1:
+        translated_parts = [
+            _GENERIC_COLOR_LABELS.get(
+                " ".join(part.casefold().split()),
+                part,
+            )
+            for part in parts
+        ]
+        return "/".join(translated_parts)
+
+    return color
 
 
 def display_product_title(title: str) -> str:
@@ -268,8 +507,17 @@ def base_product_title(title: str) -> str:
             result,
         )
 
+    pair = _find_memory_pair(result)
+
+    if pair is not None:
+        pair_match, _ = pair
+        result = (
+            result[:pair_match.start()]
+            + " "
+            + result[pair_match.end():]
+        )
+
     result = _MEMORY_PATTERN.sub(" ", result)
-    result = _MEMORY_PAIR_PATTERN.sub(" ", result)
     result = re.sub(r"\s*/\s*", " ", result)
 
     return " ".join(result.split()).strip(" -/,")
@@ -309,4 +557,29 @@ def group_by_memory(
         label = extract_memory(product.title) or "Без выбора"
         groups.setdefault(label, []).append(product)
 
-    return list(groups.items())
+    def memory_group_sort_key(
+        item: tuple[str, list[ProductCandidate]],
+    ) -> tuple[int, int, str]:
+        label = item[0]
+
+        if label == "Без выбора":
+            return (1, 0, label)
+
+        sizes = [
+            _memory_part_size(part)
+            for part in label.split("/")
+        ]
+
+        return (
+            0,
+            max(sizes, default=0),
+            "/".join(
+                f"{size:012d}"
+                for size in sizes
+            ),
+        )
+
+    return sorted(
+        groups.items(),
+        key=memory_group_sort_key,
+    )
