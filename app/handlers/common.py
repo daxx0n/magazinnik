@@ -28,7 +28,7 @@ async def handle_help(message: Message) -> None:
     await message.answer(
         "Как пользоваться ботом:\n\n"
         "🔎 Сравнение цен в Onliner, "
-        "21vek и 5 элементе:\n"
+        "21vek, 5 элементе и Shop.by:\n"
         "Просто отправь название товара.\n\n"
         "Прямая ссылка Onliner:\n"
         "/onliner ССЫЛКА\n\n"
