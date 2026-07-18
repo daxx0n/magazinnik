@@ -26,6 +26,7 @@ from app.sources.shop_by import ShopBySource
 from app.sources.twenty_one_vek import (
     TwentyOneVekSource,
 )
+from app.sources.zeon import ZeonSource
 from app.services.product_variants import (
     display_color,
     extract_color,
@@ -45,6 +46,7 @@ class PriceService:
 
     _aggregate_search_limit = 100
     _electrosila_search_limit = 30
+    _zeon_search_limit = 20
     _source_search_cache_ttl = 30.0
     _source_search_cache_size = 256
     _candidate_cache_size = 20_000
@@ -72,6 +74,8 @@ class PriceService:
         self._shop_by_source = ShopBySource()
 
         self._electrosila_source = ElectrosilaSource()
+
+        self._zeon_source = ZeonSource()
 
         self._source_search_cache: OrderedDict[
             tuple[str, str, int],
@@ -294,6 +298,11 @@ class PriceService:
                     canonical_title=canonical_title,
                 )
             ),
+            self._timed_result(
+                self._search_zeon_query(
+                    query=cross_source_query,
+                )
+            ),
         )
 
         if selected_candidate is not None:
@@ -303,6 +312,7 @@ class PriceService:
                 (twenty_one_result, twenty_one_duration),
                 (shop_by_result, shop_by_duration),
                 (electrosila_result, electrosila_duration),
+                (zeon_result, zeon_duration),
             ) = await asyncio.gather(
                 self._timed_result(
                     self.search_onliner_key(product_key)
@@ -344,6 +354,7 @@ class PriceService:
                 (twenty_one_result, twenty_one_duration),
                 (shop_by_result, shop_by_duration),
                 (electrosila_result, electrosila_duration),
+                (zeon_result, zeon_duration),
             ) = await asyncio.gather(
                 *external_searches,
             )
@@ -369,6 +380,7 @@ class PriceService:
                 electrosila_result,
                 electrosila_duration,
             ),
+            ("Zeon", zeon_result, zeon_duration),
         ):
             if isinstance(result, BaseException):
                 logger.warning(
@@ -615,6 +627,23 @@ class PriceService:
             query=query,
             canonical_title=canonical_title,
             limit=self._electrosila_search_limit,
+        )
+
+    async def _search_zeon_query(
+        self,
+        query: str,
+    ) -> list[ProductOffer]:
+        """Ищет Zeon по базовому названию выбранной модели."""
+
+        return await self._cached_source_search(
+            source_name="Zeon_offers",
+            query=query,
+            limit=self._zeon_search_limit,
+            loader=partial(
+                self._zeon_source.find_offers,
+                query=query,
+                limit=self._zeon_search_limit,
+            ),
         )
 
     async def _search_offer_source_by_query(
