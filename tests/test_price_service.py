@@ -69,6 +69,61 @@ class ModelMatchingTest(unittest.TestCase):
                     expected,
                 )
 
+    def test_builds_fallback_query_without_wildcard_code(self) -> None:
+        title = "Sony PlayStation 5 Pro CFI-71XX (2 ревизия)"
+        query = PriceService._build_cross_source_query(title)
+
+        self.assertEqual(
+            PriceService._build_source_queries(query, title),
+            [
+                "Sony PlayStation 5 Pro CFI-71XX",
+                "Sony PlayStation 5 Pro",
+            ],
+        )
+
+    def test_matches_playstation_alias_and_revision_evidence(self) -> None:
+        canonical = (
+            "Sony PlayStation 5 Pro CFI-71XX (2 ревизия)"
+        )
+        accepted = [
+            (
+                "Игровая приставка Sony PlayStation 5 Pro "
+                "(2 ревизия)",
+                "PS5 Pro",
+            ),
+            (
+                "Игровая приставка Sony PlayStation 5 Pro "
+                "Digital Edition (CFI-7121B)",
+                "PlayStation 5 Pro",
+            ),
+        ]
+
+        for candidate, requested in accepted:
+            with self.subTest(candidate=candidate):
+                self.assertIsNone(
+                    PriceService._model_mismatch_reason(
+                        canonical,
+                        candidate,
+                        requested_title=requested,
+                    )
+                )
+
+        self.assertIsNotNone(
+            PriceService._model_mismatch_reason(
+                canonical,
+                "Sony PlayStation 5 Pro (1 ревизия)",
+                requested_title="PS5 Pro",
+            )
+        )
+        self.assertEqual(
+            PriceService._model_mismatch_reason(
+                canonical,
+                "Sony PlayStation 5 Pro (2 контроллера)",
+                requested_title="PS5 Pro",
+            ),
+            "bundle",
+        )
+
     def test_explains_mismatch_reason(self) -> None:
         cases = [
             (
