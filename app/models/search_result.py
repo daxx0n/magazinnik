@@ -35,3 +35,4 @@ class ComparisonResult:
     product_title: str = ""
     duration_seconds: float = 0.0
     completed_at: str = ""
+    product_key: str = ""
