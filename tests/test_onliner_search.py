@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import AsyncMock
 
@@ -109,6 +110,105 @@ class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
                 ("tabletpc", "Планшеты"),
                 ("tv", "Телевизоры"),
             ],
+        )
+        self.assertEqual(source._request_json.await_count, 3)
+
+    async def test_discovers_categories_concurrently(self) -> None:
+        source = OnlinerSource()
+        source._create_client = lambda: FakeClient()
+        active_requests = 0
+        max_active_requests = 0
+
+        async def request_page(**kwargs) -> dict[str, object]:
+            nonlocal active_requests, max_active_requests
+            page = int(kwargs["params"]["page"])
+            active_requests += 1
+            max_active_requests = max(
+                max_active_requests,
+                active_requests,
+            )
+            await asyncio.sleep(0.01)
+            active_requests -= 1
+            category = "mobile" if page == 1 else "tv"
+            return search_page(
+                [
+                    raw_product(
+                        f"samsung-{page}",
+                        f"Samsung product {page}",
+                        category=category,
+                        brand="samsung",
+                    )
+                ],
+                current=page,
+                last=12,
+            )
+
+        source._request_json = AsyncMock(side_effect=request_page)
+
+        categories = await source.find_categories("Samsung")
+
+        self.assertEqual(
+            [category.key for category in categories],
+            ["mobile", "tv"],
+        )
+        self.assertEqual(source._request_json.await_count, 12)
+        self.assertEqual(max_active_requests, 5)
+
+    async def test_reuses_category_discovery_pages_for_products(
+        self,
+    ) -> None:
+        source = OnlinerSource()
+        source._create_client = lambda: FakeClient()
+        source._request_json = AsyncMock(
+            side_effect=[
+                search_page(
+                    [
+                        raw_product(
+                            "phone-1",
+                            "Телефон Samsung Galaxy S25",
+                            category="mobile",
+                            brand="samsung",
+                        )
+                    ],
+                    current=1,
+                    last=3,
+                ),
+                search_page(
+                    [
+                        raw_product(
+                            "tv-1",
+                            "Телевизор Samsung QLED",
+                            category="tv",
+                            brand="samsung",
+                        )
+                    ],
+                    current=2,
+                    last=3,
+                ),
+                search_page(
+                    [
+                        raw_product(
+                            "phone-2",
+                            "Телефон Samsung Galaxy A55",
+                            category="mobile",
+                            brand="samsung",
+                        )
+                    ],
+                    current=3,
+                    last=3,
+                ),
+            ]
+        )
+
+        await source.find_categories("Samsung")
+        products = await source.find_products(
+            "Samsung",
+            category="mobile",
+        )
+
+        self.assertEqual(
+            [product.key for product in products],
+            ["phone-1", "phone-2"],
         )
         self.assertEqual(source._request_json.await_count, 3)
 
@@ -260,6 +360,49 @@ class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
             ["phone-1", "phone-2"],
         )
         self.assertEqual(source._request_json.await_count, 5)
+
+    async def test_selected_category_loads_pages_concurrently(
+        self,
+    ) -> None:
+        source = OnlinerSource()
+        source._create_client = lambda: FakeClient()
+        active_requests = 0
+        max_active_requests = 0
+
+        async def request_page(**kwargs) -> dict[str, object]:
+            nonlocal active_requests, max_active_requests
+            page = int(kwargs["params"]["page"])
+            active_requests += 1
+            max_active_requests = max(
+                max_active_requests,
+                active_requests,
+            )
+            await asyncio.sleep(0.01)
+            active_requests -= 1
+            return search_page(
+                [
+                    raw_product(
+                        f"phone-{page}",
+                        f"Телефон Samsung {page}",
+                        category="mobile",
+                    )
+                ],
+                current=page,
+                last=11,
+            )
+
+        source._request_json = AsyncMock(side_effect=request_page)
+
+        products = await source.find_products(
+            "Samsung",
+            category="mobile",
+        )
+
+        self.assertEqual(
+            [product.key for product in products],
+            [f"phone-{page}" for page in range(1, 12)],
+        )
+        self.assertEqual(max_active_requests, 5)
 
     def test_sorts_iphone_generation_and_versions(self) -> None:
         source = OnlinerSource()
