@@ -1,6 +1,7 @@
 import logging
 import secrets
 from collections import OrderedDict
+from dataclasses import dataclass
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -14,6 +15,7 @@ from aiogram.utils.keyboard import (
     InlineKeyboardBuilder,
 )
 
+from app.models.category import ProductCategory
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import (
@@ -41,10 +43,29 @@ price_service = PriceService()
 logger = logging.getLogger(__name__)
 
 PRODUCT_PAGE_SIZE = 10
+CATEGORY_PAGE_SIZE = 10
 MAX_SEARCH_SESSIONS = 100
 product_searches: OrderedDict[
     str,
     list[ProductCandidate],
+] = OrderedDict()
+product_search_parents: dict[
+    str,
+    tuple[str, int],
+] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class CategorySearchSession:
+    """Широкий запрос и найденные для него разделы."""
+
+    query: str
+    categories: list[ProductCategory]
+
+
+category_searches: OrderedDict[
+    str,
+    CategorySearchSession,
 ] = OrderedDict()
 
 
@@ -398,6 +419,148 @@ async def handle_product_page(
             products=products,
             search_id=search_id,
             page=page,
+        ),
+    )
+
+
+@router.callback_query(
+    F.data.startswith("olcp:")
+)
+async def handle_category_page(
+    callback: CallbackQuery,
+) -> None:
+    """Переключает страницы товарных категорий."""
+
+    await callback.answer()
+
+    if callback.message is None:
+        return
+
+    parts = (callback.data or "").split(":")
+
+    if len(parts) != 3:
+        return
+
+    _, search_id, raw_page = parts
+    session = category_searches.get(search_id)
+
+    if session is None:
+        await callback.message.edit_text(
+            "Результаты поиска устарели. Повтори запрос."
+        )
+        return
+
+    try:
+        page = int(raw_page)
+    except ValueError:
+        return
+
+    max_page = (
+        len(session.categories) - 1
+    ) // CATEGORY_PAGE_SIZE
+    page = min(max(page, 0), max_page)
+
+    await callback.message.edit_text(
+        format_category_page_text(
+            query=session.query,
+            total=len(session.categories),
+            page=page,
+        ),
+        reply_markup=build_category_keyboard(
+            categories=session.categories,
+            search_id=search_id,
+            page=page,
+        ),
+    )
+
+
+@router.callback_query(
+    F.data.startswith("olc:")
+)
+async def handle_category_selection(
+    callback: CallbackQuery,
+) -> None:
+    """Загружает модели выбранной категории."""
+
+    await callback.answer()
+
+    if callback.message is None:
+        return
+
+    parts = (callback.data or "").split(":")
+
+    if len(parts) != 3:
+        return
+
+    _, category_search_id, raw_category_index = parts
+    session = category_searches.get(category_search_id)
+
+    if session is None:
+        await callback.message.edit_text(
+            "Результаты поиска устарели. Повтори запрос."
+        )
+        return
+
+    try:
+        category_index = int(raw_category_index)
+        category = session.categories[category_index]
+    except (ValueError, IndexError):
+        return
+
+    await callback.message.edit_text(
+        f"🔎 Ищу {session.query} в категории "
+        f"«{category.title}»..."
+    )
+
+    try:
+        products = await price_service.find_onliner_products(
+            query=session.query,
+            category=category.key,
+        )
+    except SourceUnavailableError as error:
+        logger.warning(
+            "Onliner category search unavailable: %s",
+            error,
+        )
+        await callback.message.edit_text(
+            "Поиск Onliner временно недоступен."
+        )
+        return
+    except Exception:
+        logger.exception("Unexpected category search error")
+        await callback.message.edit_text(
+            "Произошла ошибка при поиске."
+        )
+        return
+
+    category_page = category_index // CATEGORY_PAGE_SIZE
+
+    if not products:
+        await callback.message.edit_text(
+            "В этой категории подходящие товары не найдены.",
+            reply_markup=build_category_back_keyboard(
+                category_search_id,
+                category_page,
+            ),
+        )
+        return
+
+    search_id = store_product_search(
+        products,
+        parent=(category_search_id, category_page),
+    )
+    groups = group_product_variants(products)
+
+    await callback.message.edit_text(
+        f"Категория: {category.title}\n\n"
+        + format_product_page_text(
+            total=len(groups),
+            page=0,
+        ),
+        reply_markup=build_product_keyboard(
+            products=products,
+            search_id=search_id,
+            page=0,
         ),
     )
 
@@ -759,9 +922,42 @@ async def handle_search(
     )
 
     try:
+        categories: list[ProductCategory] = []
+
+        if price_service.should_categorize_query(query):
+            categories = (
+                await price_service.find_onliner_categories(query)
+            )
+
+        if len(categories) > 1:
+            category_search_id = store_category_search(
+                query=query,
+                categories=categories,
+            )
+            await status_message.edit_text(
+                format_category_page_text(
+                    query=query,
+                    total=len(categories),
+                    page=0,
+                ),
+                reply_markup=build_category_keyboard(
+                    categories=categories,
+                    search_id=category_search_id,
+                    page=0,
+                ),
+            )
+            return
+
         products = (
             await price_service
-            .find_onliner_products(query)
+            .find_onliner_products(
+                query,
+                category=(
+                    categories[0].key
+                    if len(categories) == 1
+                    else None
+                ),
+            )
         )
     except SourceUnavailableError as error:
         logger.warning(
@@ -878,6 +1074,20 @@ def build_product_keyboard(
     if navigation:
         builder.row(*navigation)
 
+    parent = product_search_parents.get(search_id)
+
+    if parent is not None:
+        category_search_id, category_page = parent
+        builder.row(
+            InlineKeyboardButton(
+                text="⬅️ К категориям",
+                callback_data=(
+                    f"olcp:{category_search_id}:"
+                    f"{category_page}"
+                ),
+            )
+        )
+
     return builder.as_markup()
 
 
@@ -975,6 +1185,7 @@ async def show_color_selection(
 
 def store_product_search(
     products: list[ProductCandidate],
+    parent: tuple[str, int] | None = None,
 ) -> str:
     """Сохраняет результаты для пагинации."""
 
@@ -982,10 +1193,126 @@ def store_product_search(
     product_searches[search_id] = products
     product_searches.move_to_end(search_id)
 
+    if parent is not None:
+        product_search_parents[search_id] = parent
+
     while len(product_searches) > MAX_SEARCH_SESSIONS:
-        product_searches.popitem(last=False)
+        expired_search_id, _ = product_searches.popitem(
+            last=False
+        )
+        product_search_parents.pop(expired_search_id, None)
 
     return search_id
+
+
+def store_category_search(
+    query: str,
+    categories: list[ProductCategory],
+) -> str:
+    """Сохраняет категории широкого запроса."""
+
+    search_id = secrets.token_urlsafe(6)
+    category_searches[search_id] = CategorySearchSession(
+        query=query,
+        categories=categories,
+    )
+    category_searches.move_to_end(search_id)
+
+    while len(category_searches) > MAX_SEARCH_SESSIONS:
+        category_searches.popitem(last=False)
+
+    return search_id
+
+
+def build_category_keyboard(
+    categories: list[ProductCategory],
+    search_id: str,
+    page: int,
+) -> InlineKeyboardMarkup:
+    """Создаёт страницу выбора категории."""
+
+    builder = InlineKeyboardBuilder()
+    start = page * CATEGORY_PAGE_SIZE
+    end = start + CATEGORY_PAGE_SIZE
+
+    for category_index, category in enumerate(
+        categories[start:end],
+        start=start,
+    ):
+        builder.row(
+            InlineKeyboardButton(
+                text=category.title,
+                callback_data=(
+                    f"olc:{search_id}:{category_index}"
+                ),
+            )
+        )
+
+    navigation: list[InlineKeyboardButton] = []
+
+    if page > 0:
+        navigation.extend(
+            [
+                InlineKeyboardButton(
+                    text="⏮ В начало",
+                    callback_data=f"olcp:{search_id}:0",
+                ),
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data=(
+                        f"olcp:{search_id}:{page - 1}"
+                    ),
+                ),
+            ]
+        )
+
+    if end < len(categories):
+        navigation.append(
+            InlineKeyboardButton(
+                text="Далее ➡️",
+                callback_data=f"olcp:{search_id}:{page + 1}",
+            )
+        )
+
+    if navigation:
+        builder.row(*navigation)
+
+    return builder.as_markup()
+
+
+def build_category_back_keyboard(
+    search_id: str,
+    page: int,
+) -> InlineKeyboardMarkup:
+    """Создаёт кнопку возврата к категориям."""
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="⬅️ К категориям",
+        callback_data=f"olcp:{search_id}:{page}",
+    )
+    return builder.as_markup()
+
+
+def format_category_page_text(
+    query: str,
+    total: int,
+    page: int,
+) -> str:
+    """Объясняет промежуточный выбор категории."""
+
+    total_pages = max(
+        1,
+        (total + CATEGORY_PAGE_SIZE - 1)
+        // CATEGORY_PAGE_SIZE,
+    )
+
+    return (
+        f"Запрос «{query}» относится к нескольким "
+        "категориям.\n"
+        f"Страница {page + 1} из {total_pages}.\n\n"
+        "Сначала выбери тип товара:"
+    )
 
 
 def format_product_page_text(
