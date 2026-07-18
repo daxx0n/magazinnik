@@ -133,12 +133,53 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_searches_shop_by_with_color_variants(self) -> None:
+        service = PriceService()
+        offer = make_offer(
+            "Shop.by",
+            "Apple iPhone 17 512GB Black",
+            3400,
+        )
+        service._shop_by_source.find_offers = AsyncMock(
+            side_effect=[[offer], [], [offer]]
+        )
+
+        offers = await service._search_shop_by_query(
+            query="Apple iPhone 17 512GB",
+            canonical_title="Apple iPhone 17 512GB (черный)",
+        )
+
+        self.assertEqual(offers, [offer])
+        self.assertEqual(
+            [
+                call.kwargs
+                for call in service._shop_by_source
+                .find_offers.await_args_list
+            ],
+            [
+                {
+                    "query": "Apple iPhone 17 512GB черный",
+                    "limit": 100,
+                },
+                {
+                    "query": "Apple iPhone 17 512GB black",
+                    "limit": 100,
+                },
+                {
+                    "query": "Apple iPhone 17 512GB",
+                    "limit": 100,
+                },
+            ],
+        )
+
     def test_keeps_only_cheapest_offer_per_source(self) -> None:
         offers = [
             make_offer("Onliner", "Model", 1200),
             make_offer("Onliner", "Model", 1100),
             make_offer("5 элемент", "Model", 1300),
             make_offer("21vek", "Model", 1250),
+            make_offer("Shop.by", "Model", 1150),
+            make_offer("Shop.by", "Model", 1175),
         ]
 
         result = PriceService._prepare_aggregate_offers(
@@ -149,6 +190,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             [(offer.source, offer.price) for offer in result],
             [
                 ("Onliner", 1100),
+                ("Shop.by", 1150),
                 ("21vek", 1250),
                 ("5 элемент", 1300),
             ],
@@ -217,7 +259,10 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 [],
             )
         )
-        service._twenty_one_vek_source.find_offers = AsyncMock(
+        service._search_twenty_one_vek_by_query = AsyncMock(
+            return_value=[]
+        )
+        service._search_shop_by_query = AsyncMock(
             return_value=[]
         )
 
@@ -231,7 +276,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.offers[0].source, "5 элемент")
         self.assertEqual(
             [status.state for status in result.source_statuses],
-            ["not_found", "found", "not_found"],
+            ["not_found", "found", "not_found", "not_found"],
         )
 
     async def test_reports_every_checked_source(self) -> None:
@@ -250,8 +295,13 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         service._search_five_element_by_query = AsyncMock(
             return_value=([], True, [])
         )
-        service._twenty_one_vek_source.find_offers = AsyncMock(
+        service._search_twenty_one_vek_by_query = AsyncMock(
             return_value=[]
+        )
+        service._search_shop_by_query = AsyncMock(
+            return_value=[
+                make_offer("Shop.by", canonical, 1400)
+            ]
         )
 
         result = (
@@ -262,16 +312,24 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [status.source for status in result.source_statuses],
-            ["Onliner", "5 элемент", "21vek"],
+            ["Onliner", "5 элемент", "21vek", "Shop.by"],
         )
         self.assertEqual(
             [status.state for status in result.source_statuses],
-            ["found", "filtered", "not_found"],
+            ["found", "filtered", "not_found", "found"],
         )
         service._search_five_element_by_query.assert_awaited_once_with(
             query="Духовой шкаф Bosch HBA534EB3",
             canonical_title=canonical,
             requested_title="Bosch HBA534EB3",
+        )
+        service._search_twenty_one_vek_by_query.assert_awaited_once_with(
+            query="Духовой шкаф Bosch HBA534EB3",
+            canonical_title=canonical,
+        )
+        service._search_shop_by_query.assert_awaited_once_with(
+            query="Духовой шкаф Bosch HBA534EB3",
+            canonical_title=canonical,
         )
 
     def test_formats_all_status_variants(self) -> None:
