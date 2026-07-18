@@ -22,7 +22,8 @@ from app.models.search_result import (
 from app.services.price_service import PriceService
 from app.services.product_variants import (
     ProductVariantGroup,
-    extract_color,
+    display_color,
+    display_product_title,
     group_by_memory,
     group_product_variants,
 )
@@ -936,7 +937,7 @@ async def show_color_selection(
     used_labels: set[str] = set()
 
     for product in products:
-        label = extract_color(product.title)
+        label = display_color(product.title)
 
         if label is None:
             label = product.title
@@ -1033,7 +1034,9 @@ def format_search_result(
 ) -> str:
     """Формирует итоговое сообщение."""
 
-    product_title = offers[0].title
+    product_title = display_product_title(
+        offers[0].title
+    )
 
     lines = [
         f"📱 {product_title}",
@@ -1134,7 +1137,7 @@ async def show_comparison(
             )
 
         lines.append(
-            f"📱 {offer.title}"
+            f"📱 {display_product_title(offer.title)}"
         )
 
         lines.append(
