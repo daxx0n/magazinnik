@@ -97,6 +97,31 @@ class ShopBySourceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offers, [])
         source._download_search_page.assert_not_awaited()
 
+    async def test_preserves_model_titles_across_categories(self) -> None:
+        cases = [
+            "Ноутбук ASUS TUF Gaming A15 FA507NV-LP031",
+            "Телевизор LG OLED55C4RLA",
+            "Робот-пылесос Roborock Q8 Max Black",
+            "Кофемашина DeLonghi ECAM22.110.B",
+        ]
+
+        for index, title in enumerate(cases):
+            with self.subTest(title=title):
+                source = ShopBySource()
+                source._download_search_page = AsyncMock(
+                    return_value=offer_row(
+                        title,
+                        "1999.00",
+                        f"seller-{index}.by",
+                        f"https%3A%2F%2Fseller.by%2Fitem-{index}",
+                    )
+                )
+
+                offers = await source.find_offers(title, limit=5)
+
+                self.assertEqual(len(offers), 1)
+                self.assertEqual(offers[0].title, title)
+
 
 if __name__ == "__main__":
     unittest.main()
