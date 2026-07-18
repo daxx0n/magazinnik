@@ -328,6 +328,27 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_searches_zeon_once_by_base_model(self) -> None:
+        service = PriceService()
+        offer = make_offer(
+            "Zeon",
+            "Apple iPhone 17 512GB (черный)",
+            3399,
+        )
+        service._zeon_source.find_offers = AsyncMock(
+            return_value=[offer]
+        )
+
+        offers = await service._search_zeon_query(
+            query="Apple iPhone 17 512GB",
+        )
+
+        self.assertEqual(offers, [offer])
+        service._zeon_source.find_offers.assert_awaited_once_with(
+            query="Apple iPhone 17 512GB",
+            limit=20,
+        )
+
     async def test_reuses_recent_external_search_results(self) -> None:
         service = PriceService()
         offer = make_offer(
@@ -453,6 +474,8 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             make_offer("Shop.by", "Model", 1175),
             make_offer("Электросила", "Model", 1125),
             make_offer("Электросила", "Model", 1140),
+            make_offer("Zeon", "Model", 1075),
+            make_offer("Zeon", "Model", 1090),
         ]
 
         result = PriceService._prepare_aggregate_offers(
@@ -462,6 +485,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [(offer.source, offer.price) for offer in result],
             [
+                ("Zeon", 1075),
                 ("Onliner", 1100),
                 ("Электросила", 1125),
                 ("Shop.by", 1150),
@@ -489,6 +513,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             )
             for index, (source, price) in enumerate(
                 [
+                    ("Zeon", 3200),
                     ("Электросила", 3300),
                     ("Shop.by", 3400),
                     ("Onliner", 3500),
@@ -502,20 +527,20 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         await show_comparison(message, offers)
 
         text = message.edit_text.await_args.args[0]
-        self.assertIn("Найдено предложений: 5", text)
+        self.assertIn("Найдено предложений: 6", text)
         self.assertIn(
             "📱 Apple iPhone 17 512GB (Mist Blue)",
             text,
         )
         self.assertLess(
-            text.index("1. Электросила"),
-            text.index("2. Shop.by"),
+            text.index("1. Zeon"),
+            text.index("2. Электросила"),
         )
         self.assertLess(
-            text.index("2. Shop.by"),
-            text.index("3. Onliner"),
+            text.index("2. Электросила"),
+            text.index("3. Shop.by"),
         )
-        self.assertEqual(text.count("🔗 https://example.com/"), 5)
+        self.assertEqual(text.count("🔗 https://example.com/"), 6)
 
     def test_paginates_product_variants(self) -> None:
         products = [
@@ -641,6 +666,9 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         service._search_electrosila_query = AsyncMock(
             return_value=[]
         )
+        service._search_zeon_query = AsyncMock(
+            return_value=[]
+        )
 
         result = (
             await service.search_all_sources_by_onliner_key(
@@ -655,6 +683,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             [
                 "not_found",
                 "found",
+                "not_found",
                 "not_found",
                 "not_found",
                 "not_found",
@@ -688,6 +717,9 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             return_value=[]
         )
         service._search_electrosila_query = AsyncMock(
+            return_value=[]
+        )
+        service._search_zeon_query = AsyncMock(
             return_value=[]
         )
 
@@ -743,10 +775,13 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         service._search_electrosila_query = AsyncMock(
             side_effect=delayed([])
         )
+        service._search_zeon_query = AsyncMock(
+            side_effect=delayed([])
+        )
 
         await service.search_all_sources_by_onliner_key("iphone17")
 
-        self.assertEqual(max_active_requests, 5)
+        self.assertEqual(max_active_requests, 6)
 
     async def test_reports_every_checked_source(self) -> None:
         service = PriceService()
@@ -777,6 +812,11 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 make_offer("Электросила", canonical, 1450)
             ]
         )
+        service._search_zeon_query = AsyncMock(
+            return_value=[
+                make_offer("Zeon", canonical, 1350)
+            ]
+        )
 
         result = (
             await service.search_all_sources_by_onliner_key(
@@ -792,6 +832,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 "21vek",
                 "Shop.by",
                 "Электросила",
+                "Zeon",
             ],
         )
         self.assertEqual(
@@ -802,6 +843,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 "not_found",
                 "found",
                 "found",
+                "found",
             ],
         )
         self.assertEqual(
@@ -809,7 +851,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 status.checked_candidates
                 for status in result.source_statuses
             ],
-            [2, 0, 0, 1, 1],
+            [2, 0, 0, 1, 1, 1],
         )
         self.assertTrue(
             all(
@@ -836,6 +878,9 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         service._search_electrosila_query.assert_awaited_once_with(
             query="Духовой шкаф Bosch HBA534EB3",
             canonical_title=canonical,
+        )
+        service._search_zeon_query.assert_awaited_once_with(
+            query="Духовой шкаф Bosch HBA534EB3",
         )
 
     async def test_bounds_onliner_candidate_cache(self) -> None:
