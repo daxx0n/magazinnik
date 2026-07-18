@@ -4,6 +4,7 @@ import re
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable
+from datetime import datetime
 from functools import partial
 from typing import Any, TypeVar
 
@@ -220,6 +221,7 @@ class PriceService:
     ) -> ComparisonResult:
         """Собирает общий топ цен для выбранной модели."""
 
+        search_started = time.monotonic()
         selected_candidate = (
             self._onliner_candidates.get(product_key)
         )
@@ -227,9 +229,17 @@ class PriceService:
         if selected_candidate is not None:
             canonical_title = selected_candidate.title
         else:
-            onliner_offers = await self.search_onliner_key(
-                product_key
+            (
+                onliner_result,
+                onliner_duration,
+            ) = await self._timed_result(
+                self.search_onliner_key(product_key)
             )
+
+            if isinstance(onliner_result, BaseException):
+                raise onliner_result
+
+            onliner_offers = onliner_result
 
             if not onliner_offers:
                 raise ProductNotFoundError(
@@ -255,31 +265,38 @@ class PriceService:
         )
 
         external_searches = (
-            self._search_five_element_by_query(
-                query=cross_source_query,
-                canonical_title=canonical_title,
-                requested_title=requested_query,
+            self._timed_result(
+                self._search_five_element_by_query(
+                    query=cross_source_query,
+                    canonical_title=canonical_title,
+                    requested_title=requested_query,
+                )
             ),
-            self._search_twenty_one_vek_by_query(
-                query=cross_source_query,
-                canonical_title=canonical_title,
+            self._timed_result(
+                self._search_twenty_one_vek_by_query(
+                    query=cross_source_query,
+                    canonical_title=canonical_title,
+                )
             ),
-            self._search_shop_by_query(
-                query=cross_source_query,
-                canonical_title=canonical_title,
+            self._timed_result(
+                self._search_shop_by_query(
+                    query=cross_source_query,
+                    canonical_title=canonical_title,
+                )
             ),
         )
 
         if selected_candidate is not None:
             (
-                onliner_result,
-                five_result,
-                twenty_one_result,
-                shop_by_result,
+                (onliner_result, onliner_duration),
+                (five_result, five_duration),
+                (twenty_one_result, twenty_one_duration),
+                (shop_by_result, shop_by_duration),
             ) = await asyncio.gather(
-                self.search_onliner_key(product_key),
+                self._timed_result(
+                    self.search_onliner_key(product_key)
+                ),
                 *external_searches,
-                return_exceptions=True,
             )
 
             if isinstance(onliner_result, BaseException):
@@ -312,12 +329,11 @@ class PriceService:
         else:
             onliner_state = "found"
             (
-                five_result,
-                twenty_one_result,
-                shop_by_result,
+                (five_result, five_duration),
+                (twenty_one_result, twenty_one_duration),
+                (shop_by_result, shop_by_duration),
             ) = await asyncio.gather(
                 *external_searches,
-                return_exceptions=True,
             )
 
         combined_offers = list(onliner_offers)
@@ -327,13 +343,15 @@ class PriceService:
                 source="Onliner",
                 state=onliner_state,
                 matched_offers=len(onliner_offers),
+                checked_candidates=len(onliner_offers),
+                duration_seconds=onliner_duration,
             )
         ]
 
-        for source_name, result in (
-            ("5 элемент", five_result),
-            ("21vek", twenty_one_result),
-            ("Shop.by", shop_by_result),
+        for source_name, result, duration in (
+            ("5 элемент", five_result, five_duration),
+            ("21vek", twenty_one_result, twenty_one_duration),
+            ("Shop.by", shop_by_result, shop_by_duration),
         ):
             if isinstance(result, BaseException):
                 logger.warning(
@@ -345,6 +363,7 @@ class PriceService:
                     SourceSearchStatus(
                         source=source_name,
                         state="unavailable",
+                        duration_seconds=duration,
                     )
                 )
                 continue
@@ -358,8 +377,10 @@ class PriceService:
                 match_decisions.extend(
                     source_decisions
                 )
+                checked_candidates = len(source_decisions)
             else:
                 had_candidates = bool(result)
+                checked_candidates = len(result)
                 source_offers = []
 
                 for offer in result:
@@ -411,6 +432,8 @@ class PriceService:
                     source=source_name,
                     state=state,
                     matched_offers=len(source_offers),
+                    checked_candidates=checked_candidates,
+                    duration_seconds=duration,
                 )
             )
 
@@ -422,7 +445,30 @@ class PriceService:
             offers=offers,
             source_statuses=source_statuses,
             match_decisions=match_decisions,
+            query=requested_query,
+            product_title=canonical_title,
+            duration_seconds=(
+                time.monotonic() - search_started
+            ),
+            completed_at=datetime.now().strftime(
+                "%d.%m.%Y %H:%M:%S"
+            ),
         )
+
+    @staticmethod
+    async def _timed_result(
+        awaitable: Awaitable[SearchItem],
+    ) -> tuple[SearchItem | BaseException, float]:
+        """Измеряет операцию, сохраняя её обычную ошибку."""
+
+        started = time.monotonic()
+
+        try:
+            result = await awaitable
+        except Exception as error:
+            result = error
+
+        return result, time.monotonic() - started
 
     async def _search_five_element_by_query(
         self,
