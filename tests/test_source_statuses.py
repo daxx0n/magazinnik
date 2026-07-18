@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import AsyncMock
 
@@ -15,7 +16,10 @@ from app.handlers.search import (
     show_comparison,
 )
 from app.services.price_service import PriceService
-from app.sources import ProductNotFoundError
+from app.sources import (
+    ProductNotFoundError,
+    SourceUnavailableError,
+)
 from app.sources.five_element import FiveElementSource
 
 
@@ -49,6 +53,24 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             candidate.title,
             "Apple iPhone 17 512GB Black",
+        )
+
+    def test_bounds_five_element_candidate_cache(self) -> None:
+        source = FiveElementSource()
+        source._candidate_cache_size = 2
+
+        for index in range(3):
+            source._remember_candidate(
+                ProductCandidate(
+                    key=f"model-{index}",
+                    title=f"Model {index}",
+                    url=f"https://example.com/{index}",
+                )
+            )
+
+        self.assertEqual(
+            list(source._candidate_urls),
+            ["model-1", "model-2"],
         )
 
     async def test_searches_five_element_with_color_variants(self) -> None:
@@ -98,6 +120,40 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         )
+
+    async def test_five_element_survives_partial_search_failure(
+        self,
+    ) -> None:
+        service = PriceService()
+        candidate = ProductCandidate(
+            key="iphone-17-black",
+            title="Apple iPhone 17 512GB Black",
+            url="https://5element.by/products/iphone-17-black",
+        )
+        offer = make_offer("5 элемент", candidate.title, 3500)
+        service._five_element_source.find_products = AsyncMock(
+            side_effect=[
+                SourceUnavailableError("timeout"),
+                [candidate],
+                [],
+            ]
+        )
+        service.search_five_element_key = AsyncMock(
+            return_value=[offer]
+        )
+
+        offers, had_candidates, _ = (
+            await service._search_five_element_by_query(
+                query="Apple iPhone 17 512GB",
+                canonical_title=(
+                    "Apple iPhone 17 512GB (черный)"
+                ),
+                requested_title="iPhone",
+            )
+        )
+
+        self.assertEqual(offers, [offer])
+        self.assertTrue(had_candidates)
 
     async def test_searches_twenty_one_vek_with_color_variants(self) -> None:
         service = PriceService()
@@ -176,6 +232,121 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         )
+
+    async def test_reuses_recent_external_search_results(self) -> None:
+        service = PriceService()
+        offer = make_offer(
+            "21vek",
+            "Apple iPhone 17 512GB Black",
+            3500,
+        )
+        service._twenty_one_vek_source.find_offers = AsyncMock(
+            return_value=[offer]
+        )
+
+        for _ in range(2):
+            result = await service._search_twenty_one_vek_by_query(
+                query="Apple iPhone 17 512GB",
+                canonical_title=(
+                    "Apple iPhone 17 512GB (черный)"
+                ),
+            )
+            self.assertEqual(result, [offer])
+
+        self.assertEqual(
+            service._twenty_one_vek_source.find_offers.await_count,
+            3,
+        )
+
+    async def test_coalesces_simultaneous_external_searches(
+        self,
+    ) -> None:
+        service = PriceService()
+        offer = make_offer("Shop.by", "Phone Black", 1000)
+
+        async def delayed_search(**kwargs) -> list[ProductOffer]:
+            await asyncio.sleep(0.01)
+            return [offer]
+
+        service._shop_by_source.find_offers = AsyncMock(
+            side_effect=delayed_search
+        )
+
+        results = await asyncio.gather(
+            *(
+                service._search_shop_by_query(
+                    query="Phone 256GB",
+                    canonical_title="Phone 256GB (Black)",
+                )
+                for _ in range(2)
+            )
+        )
+
+        self.assertEqual(results, [[offer], [offer]])
+        self.assertEqual(
+            service._shop_by_source.find_offers.await_count,
+            2,
+        )
+
+    async def test_does_not_cache_external_search_errors(self) -> None:
+        service = PriceService()
+        service._shop_by_source.find_offers = AsyncMock(
+            side_effect=SourceUnavailableError("timeout")
+        )
+
+        for _ in range(2):
+            with self.assertRaises(SourceUnavailableError):
+                await service._search_shop_by_query(
+                    query="Phone 256GB",
+                    canonical_title="Phone 256GB (Black)",
+                )
+
+        self.assertEqual(
+            service._shop_by_source.find_offers.await_count,
+            4,
+        )
+
+    async def test_cancelled_waiter_does_not_cancel_shared_search(
+        self,
+    ) -> None:
+        service = PriceService()
+        offer = make_offer("Shop.by", "Phone", 1000)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        loader_calls = 0
+
+        async def loader() -> list[ProductOffer]:
+            nonlocal loader_calls
+            loader_calls += 1
+            started.set()
+            await release.wait()
+            return [offer]
+
+        waiter = asyncio.create_task(
+            service._cached_source_search(
+                source_name="test",
+                query="Phone",
+                limit=100,
+                loader=loader,
+            )
+        )
+        await started.wait()
+        waiter.cancel()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await waiter
+
+        release.set()
+        result = await service._cached_source_search(
+            source_name="test",
+            query="Phone",
+            limit=100,
+            loader=loader,
+        )
+
+        self.assertEqual(result, [offer])
+        self.assertEqual(loader_calls, 1)
+        self.assertEqual(service._source_search_tasks, {})
 
     def test_keeps_only_cheapest_offer_per_source(self) -> None:
         offers = [
@@ -382,6 +553,87 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             ["not_found", "found", "not_found", "not_found"],
         )
 
+    async def test_continues_when_onliner_is_unavailable(self) -> None:
+        service = PriceService()
+        canonical = "LG OLED C4 OLED55C4RLA"
+        service._onliner_candidates["oled55c4rla"] = (
+            ProductCandidate(
+                key="oled55c4rla",
+                title=canonical,
+                url="https://example.com/onliner",
+            )
+        )
+        service.search_onliner_key = AsyncMock(
+            side_effect=SourceUnavailableError("timeout")
+        )
+        service._search_five_element_by_query = AsyncMock(
+            return_value=(
+                [make_offer("5 элемент", canonical, 3000)],
+                True,
+                [],
+            )
+        )
+        service._search_twenty_one_vek_by_query = AsyncMock(
+            return_value=[]
+        )
+        service._search_shop_by_query = AsyncMock(
+            return_value=[]
+        )
+
+        result = await service.search_all_sources_by_onliner_key(
+            "oled55c4rla"
+        )
+
+        self.assertEqual(result.offers[0].source, "5 элемент")
+        self.assertEqual(
+            result.source_statuses[0].state,
+            "unavailable",
+        )
+
+    async def test_searches_all_sources_concurrently(self) -> None:
+        service = PriceService()
+        canonical = "Apple iPhone 17 512GB (черный)"
+        service._onliner_candidates["iphone17"] = ProductCandidate(
+            key="iphone17",
+            title=canonical,
+            url="https://example.com/onliner",
+        )
+        active_requests = 0
+        max_active_requests = 0
+
+        def delayed(result):
+            async def call(*args, **kwargs):
+                nonlocal active_requests, max_active_requests
+                active_requests += 1
+                max_active_requests = max(
+                    max_active_requests,
+                    active_requests,
+                )
+                await asyncio.sleep(0.01)
+                active_requests -= 1
+                return result
+
+            return call
+
+        service.search_onliner_key = AsyncMock(
+            side_effect=delayed(
+                [make_offer("Onliner", canonical, 3500)]
+            )
+        )
+        service._search_five_element_by_query = AsyncMock(
+            side_effect=delayed(([], False, []))
+        )
+        service._search_twenty_one_vek_by_query = AsyncMock(
+            side_effect=delayed([])
+        )
+        service._search_shop_by_query = AsyncMock(
+            side_effect=delayed([])
+        )
+
+        await service.search_all_sources_by_onliner_key("iphone17")
+
+        self.assertEqual(max_active_requests, 4)
+
     async def test_reports_every_checked_source(self) -> None:
         service = PriceService()
         canonical = "Духовой шкаф Bosch HBA534EB3"
@@ -433,6 +685,31 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         service._search_shop_by_query.assert_awaited_once_with(
             query="Духовой шкаф Bosch HBA534EB3",
             canonical_title=canonical,
+        )
+
+    async def test_bounds_onliner_candidate_cache(self) -> None:
+        service = PriceService()
+        service._candidate_cache_size = 2
+        service._onliner_source.find_products = AsyncMock(
+            return_value=[
+                ProductCandidate(
+                    key=f"model-{index}",
+                    title=f"Model {index}",
+                    url=f"https://example.com/{index}",
+                )
+                for index in range(3)
+            ]
+        )
+
+        await service.find_onliner_products("Model")
+
+        self.assertEqual(
+            list(service._onliner_candidates),
+            ["model-1", "model-2"],
+        )
+        self.assertEqual(
+            list(service._onliner_queries),
+            ["model-1", "model-2"],
         )
 
     def test_formats_all_status_variants(self) -> None:
