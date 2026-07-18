@@ -3,6 +3,8 @@ import unittest
 from app.models.product import ProductCandidate
 from app.services.product_variants import (
     base_product_title,
+    display_color,
+    display_product_title,
     extract_color,
     extract_color_key,
     extract_memory,
@@ -20,6 +22,48 @@ def candidate(key: str, title: str) -> ProductCandidate:
 
 
 class ProductVariantsTest(unittest.TestCase):
+    def test_displays_original_marketing_color_names(self) -> None:
+        cases = [
+            (
+                "Apple iPhone 17 512GB (черный)",
+                "Black",
+            ),
+            (
+                "Apple iPhone 17 512GB (голубой)",
+                "Mist Blue",
+            ),
+            (
+                "Apple iPhone 17 512GB (сиреневый)",
+                "Lavender",
+            ),
+            (
+                "Apple iPhone 17 Pro 512GB (оранжевый)",
+                "Cosmic Orange",
+            ),
+            (
+                "Samsung Galaxy S25 (синий)",
+                "Blue",
+            ),
+            (
+                "Google Pixel 10 (Obsidian)",
+                "Obsidian",
+            ),
+        ]
+
+        for title, expected in cases:
+            with self.subTest(title=title):
+                self.assertEqual(
+                    display_color(title),
+                    expected,
+                )
+
+        self.assertEqual(
+            display_product_title(
+                "Apple iPhone 17 512GB (голубой)"
+            ),
+            "Apple iPhone 17 512GB (Mist Blue)",
+        )
+
     def test_extracts_common_memory_formats(self) -> None:
         cases = [
             ("Apple iPhone 17 256GB", "256GB"),
