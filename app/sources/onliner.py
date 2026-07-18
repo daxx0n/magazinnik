@@ -635,7 +635,55 @@ class OnlinerSource:
             "iphone" not in query.casefold()
             and len(iphone_candidates) != len(candidates)
         ):
-            return candidates
+            def normalize_tokens(value: str) -> list[str]:
+                return re.findall(
+                    r"[a-zа-яё0-9]+",
+                    value.casefold(),
+                )
+
+            query_tokens = normalize_tokens(query)
+            query_token_set = set(query_tokens)
+            version_markers = {
+                "air",
+                "fe",
+                "lite",
+                "max",
+                "mini",
+                "plus",
+                "pro",
+                "ultra",
+                "xl",
+            }
+
+            def relevance_key(
+                candidate: ProductCandidate,
+            ) -> tuple[int, int, int]:
+                base_title = OnlinerSource._base_variant_title(
+                    candidate.title
+                )
+                title_tokens = normalize_tokens(base_title)
+                title_token_set = set(title_tokens)
+                missing_query_tokens = len(
+                    query_token_set - title_token_set
+                )
+                extra_versions = len(
+                    (title_token_set & version_markers)
+                    - (query_token_set & version_markers)
+                )
+
+                if (
+                    re.search(r"[a-zа-яё0-9]\+", base_title, re.I)
+                    and "+" not in query
+                ):
+                    extra_versions += 1
+
+                return (
+                    missing_query_tokens,
+                    extra_versions,
+                    abs(len(title_tokens) - len(query_tokens)),
+                )
+
+            return sorted(candidates, key=relevance_key)
 
         generations = [
             int(match.group(1))
