@@ -479,7 +479,7 @@ async def load_product_comparison(
 
     await message.edit_text(
         "🔎 Сравниваю цены Onliner, 21vek, "
-        "5 элемента, Shop.by и Электросилы..."
+        "5 элемента, Shop.by, Электросилы и Zeon..."
     )
 
     try:
