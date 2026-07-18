@@ -155,6 +155,42 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offers, [offer])
         self.assertTrue(had_candidates)
 
+    async def test_five_element_matches_deep_blue_alias(self) -> None:
+        service = PriceService()
+        canonical = (
+            "Apple iPhone 17 Pro 256GB (глубокий синий)"
+        )
+        candidate = ProductCandidate(
+            key="355063",
+            title=(
+                "Смартфон Apple iPhone 17 Pro 256GB "
+                "Deep Blue (MG8J4KH/A)"
+            ),
+            url=(
+                "https://5element.by/products/"
+                "iphone-17-pro-256gb-deep-blue-telefon-gsm-apple-"
+                "mg8j4kh-a"
+            ),
+        )
+        offer = make_offer("5 элемент", candidate.title, 4899)
+        service._five_element_source.find_products = AsyncMock(
+            side_effect=[[], [candidate], []]
+        )
+        service.search_five_element_key = AsyncMock(
+            return_value=[offer]
+        )
+
+        offers, had_candidates, _ = (
+            await service._search_five_element_by_query(
+                query="Apple iPhone 17 Pro 256GB",
+                canonical_title=canonical,
+                requested_title="iPhone 17 Pro",
+            )
+        )
+
+        self.assertEqual(offers, [offer])
+        self.assertTrue(had_candidates)
+
     async def test_searches_twenty_one_vek_with_color_variants(self) -> None:
         service = PriceService()
         offer = make_offer(
@@ -193,6 +229,26 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         )
+
+    async def test_twenty_one_vek_matches_deep_blue_alias(self) -> None:
+        service = PriceService()
+        offer = make_offer(
+            "21vek",
+            "Смартфон Apple iPhone 17 Pro 256GB (темно-синий)",
+            4599,
+        )
+        service._twenty_one_vek_source.find_offers = AsyncMock(
+            side_effect=[[], [offer], []]
+        )
+
+        offers = await service._search_twenty_one_vek_by_query(
+            query="Apple iPhone 17 Pro 256GB",
+            canonical_title=(
+                "Apple iPhone 17 Pro 256GB (глубокий синий)"
+            ),
+        )
+
+        self.assertEqual(offers, [offer])
 
     async def test_searches_shop_by_with_color_variants(self) -> None:
         service = PriceService()
