@@ -1,7 +1,11 @@
 import asyncio
 import logging
 import re
-from collections.abc import Iterable
+import time
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable, Iterable
+from functools import partial
+from typing import Any, TypeVar
 
 from app.models.category import ProductCategory
 from app.models.offer import ProductOffer
@@ -31,17 +35,26 @@ from app.services.product_variants import (
 logger = logging.getLogger(__name__)
 
 
+SearchItem = TypeVar("SearchItem")
+
+
 class PriceService:
     """Сервис поиска и сравнения цен."""
 
     _aggregate_search_limit = 100
+    _source_search_cache_ttl = 30.0
+    _source_search_cache_size = 256
+    _candidate_cache_size = 20_000
 
     def __init__(self) -> None:
-        self._onliner_candidates: dict[
+        self._onliner_candidates: OrderedDict[
             str,
             ProductCandidate,
-        ] = {}
-        self._onliner_queries: dict[str, str] = {}
+        ] = OrderedDict()
+        self._onliner_queries: OrderedDict[
+            str,
+            str,
+        ] = OrderedDict()
 
         self._onliner_source = OnlinerSource()
 
@@ -54,6 +67,15 @@ class PriceService:
         )
 
         self._shop_by_source = ShopBySource()
+
+        self._source_search_cache: OrderedDict[
+            tuple[str, str, int],
+            tuple[float, list[Any]],
+        ] = OrderedDict()
+        self._source_search_tasks: dict[
+            tuple[str, str, int],
+            asyncio.Task[list[Any]],
+        ] = {}
 
     async def find_onliner_products(
         self,
@@ -74,7 +96,15 @@ class PriceService:
 
         for product in products:
             self._onliner_candidates[product.key] = product
+            self._onliner_candidates.move_to_end(product.key)
             self._onliner_queries[product.key] = query
+            self._onliner_queries.move_to_end(product.key)
+
+        while len(self._onliner_candidates) > self._candidate_cache_size:
+            expired_key, _ = self._onliner_candidates.popitem(
+                last=False
+            )
+            self._onliner_queries.pop(expired_key, None)
 
         return products
 
@@ -194,26 +224,20 @@ class PriceService:
             self._onliner_candidates.get(product_key)
         )
 
-        try:
-            onliner_offers = (
-                await self.search_onliner_key(
-                    product_key
-                )
-            )
-        except ProductNotFoundError:
-            if selected_candidate is None:
-                raise
-
-            onliner_offers = []
-
-        if onliner_offers:
-            canonical_title = onliner_offers[0].title
-        elif selected_candidate is not None:
+        if selected_candidate is not None:
             canonical_title = selected_candidate.title
         else:
-            raise ProductNotFoundError(
-                "Не удалось определить выбранную модель."
+            onliner_offers = await self.search_onliner_key(
+                product_key
             )
+
+            if not onliner_offers:
+                raise ProductNotFoundError(
+                    "Не удалось определить выбранную модель."
+                )
+
+            canonical_title = onliner_offers[0].title
+
         requested_query = self._onliner_queries.get(
             product_key,
             canonical_title,
@@ -230,39 +254,78 @@ class PriceService:
             cross_source_query,
         )
 
-        (
-            five_result,
-            twenty_one_result,
-            shop_by_result,
-        ) = (
-            await asyncio.gather(
-                self._search_five_element_by_query(
-                    query=cross_source_query,
-                    canonical_title=canonical_title,
-                    requested_title=requested_query,
-                ),
-                self._search_twenty_one_vek_by_query(
-                    query=cross_source_query,
-                    canonical_title=canonical_title,
-                ),
-                self._search_shop_by_query(
-                    query=cross_source_query,
-                    canonical_title=canonical_title,
-                ),
+        external_searches = (
+            self._search_five_element_by_query(
+                query=cross_source_query,
+                canonical_title=canonical_title,
+                requested_title=requested_query,
+            ),
+            self._search_twenty_one_vek_by_query(
+                query=cross_source_query,
+                canonical_title=canonical_title,
+            ),
+            self._search_shop_by_query(
+                query=cross_source_query,
+                canonical_title=canonical_title,
+            ),
+        )
+
+        if selected_candidate is not None:
+            (
+                onliner_result,
+                five_result,
+                twenty_one_result,
+                shop_by_result,
+            ) = await asyncio.gather(
+                self.search_onliner_key(product_key),
+                *external_searches,
                 return_exceptions=True,
             )
-        )
+
+            if isinstance(onliner_result, BaseException):
+                onliner_offers = []
+                onliner_state = (
+                    "not_found"
+                    if isinstance(
+                        onliner_result,
+                        ProductNotFoundError,
+                    )
+                    else "unavailable"
+                )
+                log_method = (
+                    logger.info
+                    if isinstance(
+                        onliner_result,
+                        ProductNotFoundError,
+                    )
+                    else logger.warning
+                )
+                log_method(
+                    "Onliner aggregate search failed: %s",
+                    onliner_result,
+                )
+            else:
+                onliner_offers = onliner_result
+                onliner_state = (
+                    "found" if onliner_offers else "not_found"
+                )
+        else:
+            onliner_state = "found"
+            (
+                five_result,
+                twenty_one_result,
+                shop_by_result,
+            ) = await asyncio.gather(
+                *external_searches,
+                return_exceptions=True,
+            )
 
         combined_offers = list(onliner_offers)
         match_decisions: list[MatchDecision] = []
         source_statuses = [
             SourceSearchStatus(
                 source="Onliner",
-                state=(
-                    "found"
-                    if onliner_offers
-                    else "not_found"
-                ),
+                state=onliner_state,
                 matched_offers=len(onliner_offers),
             )
         ]
@@ -379,16 +442,32 @@ class PriceService:
         )
         search_results = await asyncio.gather(
             *(
-                self._five_element_source.find_products(
+                self._cached_source_search(
+                    source_name="5_element_products",
                     query=source_query,
                     limit=self._aggregate_search_limit,
+                    loader=partial(
+                        self._five_element_source.find_products,
+                        query=source_query,
+                        limit=self._aggregate_search_limit,
+                    ),
                 )
                 for source_query in search_queries
-            )
+            ),
+            return_exceptions=True,
         )
+        successful_results = [
+            result
+            for result in search_results
+            if not isinstance(result, BaseException)
+        ]
+
+        if not successful_results:
+            raise search_results[0]
+
         products = self._unique_candidates(
             product
-            for result in search_results
+            for result in successful_results
             for product in result
         )
         decisions: list[MatchDecision] = []
@@ -470,9 +549,15 @@ class PriceService:
 
         search_results = await asyncio.gather(
             *(
-                source.find_offers(
+                self._cached_source_search(
+                    source_name=f"{source.source_name}_offers",
                     query=source_query,
                     limit=self._aggregate_search_limit,
+                    loader=partial(
+                        source.find_offers,
+                        query=source_query,
+                        limit=self._aggregate_search_limit,
+                    ),
                 )
                 for source_query in self._build_source_queries(
                     query=query,
@@ -506,6 +591,75 @@ class PriceService:
                 )
 
         return list(unique.values())
+
+    async def _cached_source_search(
+        self,
+        source_name: str,
+        query: str,
+        limit: int,
+        loader: Callable[[], Awaitable[list[SearchItem]]],
+    ) -> list[SearchItem]:
+        """Повторно использует недавний одинаковый поиск."""
+
+        normalized_query = " ".join(
+            query.casefold().split()
+        )
+        cache_key = (
+            source_name,
+            normalized_query,
+            limit,
+        )
+        cached = self._source_search_cache.get(cache_key)
+        now = time.monotonic()
+
+        if cached is not None:
+            cached_at, cached_items = cached
+
+            if now - cached_at <= self._source_search_cache_ttl:
+                self._source_search_cache.move_to_end(cache_key)
+                return list(cached_items)
+
+            self._source_search_cache.pop(cache_key, None)
+
+        task = self._source_search_tasks.get(cache_key)
+
+        if task is None:
+            task = asyncio.create_task(loader())
+            self._source_search_tasks[cache_key] = task
+            task.add_done_callback(
+                partial(
+                    self._complete_source_search,
+                    cache_key,
+                )
+            )
+
+        result = await asyncio.shield(task)
+        return list(result)
+
+    def _complete_source_search(
+        self,
+        cache_key: tuple[str, str, int],
+        task: asyncio.Task[list[Any]],
+    ) -> None:
+        """Сохраняет успешный результат и освобождает задачу."""
+
+        if self._source_search_tasks.get(cache_key) is task:
+            self._source_search_tasks.pop(cache_key, None)
+
+        if task.cancelled() or task.exception() is not None:
+            return
+
+        self._source_search_cache[cache_key] = (
+            time.monotonic(),
+            list(task.result()),
+        )
+        self._source_search_cache.move_to_end(cache_key)
+
+        while (
+            len(self._source_search_cache)
+            > self._source_search_cache_size
+        ):
+            self._source_search_cache.popitem(last=False)
 
     @staticmethod
     def _build_source_queries(
