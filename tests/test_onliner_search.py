@@ -203,6 +203,64 @@ class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(source._request_json.await_count, 4)
 
+    async def test_selected_category_survives_long_result_gap(
+        self,
+    ) -> None:
+        source = OnlinerSource()
+        source._create_client = lambda: FakeClient()
+        pages = [
+            search_page(
+                [
+                    raw_product(
+                        "phone-1",
+                        "Телефон Samsung Galaxy S25",
+                        category="mobile",
+                    )
+                ],
+                current=1,
+                last=5,
+            )
+        ]
+        pages.extend(
+            search_page(
+                [
+                    raw_product(
+                        f"tv-{page}",
+                        f"Телевизор Samsung {page}",
+                        category="tv",
+                    )
+                ],
+                current=page,
+                last=5,
+            )
+            for page in range(2, 5)
+        )
+        pages.append(
+            search_page(
+                [
+                    raw_product(
+                        "phone-2",
+                        "Телефон Samsung Galaxy A55",
+                        category="mobile",
+                    )
+                ],
+                current=5,
+                last=5,
+            )
+        )
+        source._request_json = AsyncMock(side_effect=pages)
+
+        products = await source.find_products(
+            "Samsung",
+            category="mobile",
+        )
+
+        self.assertEqual(
+            [product.key for product in products],
+            ["phone-1", "phone-2"],
+        )
+        self.assertEqual(source._request_json.await_count, 5)
+
     def test_sorts_iphone_generation_and_versions(self) -> None:
         source = OnlinerSource()
         products = [
@@ -213,8 +271,13 @@ class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
                 ("15", "Apple iPhone 15 128GB (черный)"),
                 ("16pro", "Apple iPhone 16 Pro 256GB"),
                 ("17pm", "Apple iPhone 17 Pro Max 256GB"),
+                ("17e", "Apple iPhone 17e 256GB"),
                 ("air", "Apple iPhone Air 256GB"),
                 ("17", "Apple iPhone 17 256GB (черный)"),
+                (
+                    "17dual-esim",
+                    "Apple iPhone 17 Dual eSIM 256GB",
+                ),
                 ("16", "Apple iPhone 16 128GB"),
                 (
                     "17produal",
@@ -238,6 +301,30 @@ class OnlinerSearchTest(unittest.IsolatedAsyncioTestCase):
             [product.key for product in sorted_products],
             [
                 "17",
+                "17dual-esim",
+                "17e",
+                "17pro",
+                "17produal",
+                "17pm",
+                "air",
+                "16",
+                "16pro",
+                "15",
+            ],
+        )
+
+        self.assertEqual(
+            [
+                product.key
+                for product in source._sort_product_family(
+                    candidates,
+                    "Apple",
+                )
+            ],
+            [
+                "17",
+                "17dual-esim",
+                "17e",
                 "17pro",
                 "17produal",
                 "17pm",
