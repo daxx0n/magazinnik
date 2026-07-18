@@ -289,6 +289,45 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_searches_electrosila_with_color_variants(self) -> None:
+        service = PriceService()
+        offer = make_offer(
+            "Электросила",
+            "Apple iPhone 17 512GB Black",
+            3499,
+        )
+        service._electrosila_source.find_offers = AsyncMock(
+            side_effect=[[offer], [], [offer]]
+        )
+
+        offers = await service._search_electrosila_query(
+            query="Apple iPhone 17 512GB",
+            canonical_title="Apple iPhone 17 512GB (черный)",
+        )
+
+        self.assertEqual(offers, [offer])
+        self.assertEqual(
+            [
+                call.kwargs
+                for call in service._electrosila_source
+                .find_offers.await_args_list
+            ],
+            [
+                {
+                    "query": "Apple iPhone 17 512GB черный",
+                    "limit": 30,
+                },
+                {
+                    "query": "Apple iPhone 17 512GB Black",
+                    "limit": 30,
+                },
+                {
+                    "query": "Apple iPhone 17 512GB",
+                    "limit": 30,
+                },
+            ],
+        )
+
     async def test_reuses_recent_external_search_results(self) -> None:
         service = PriceService()
         offer = make_offer(
@@ -412,6 +451,8 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             make_offer("21vek", "Model", 1250),
             make_offer("Shop.by", "Model", 1150),
             make_offer("Shop.by", "Model", 1175),
+            make_offer("Электросила", "Model", 1125),
+            make_offer("Электросила", "Model", 1140),
         ]
 
         result = PriceService._prepare_aggregate_offers(
@@ -422,6 +463,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             [(offer.source, offer.price) for offer in result],
             [
                 ("Onliner", 1100),
+                ("Электросила", 1125),
                 ("Shop.by", 1150),
                 ("21vek", 1250),
                 ("5 элемент", 1300),
@@ -447,6 +489,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             )
             for index, (source, price) in enumerate(
                 [
+                    ("Электросила", 3300),
                     ("Shop.by", 3400),
                     ("Onliner", 3500),
                     ("21vek", 3600),
@@ -459,20 +502,20 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         await show_comparison(message, offers)
 
         text = message.edit_text.await_args.args[0]
-        self.assertIn("Найдено предложений: 4", text)
+        self.assertIn("Найдено предложений: 5", text)
         self.assertIn(
             "📱 Apple iPhone 17 512GB (Mist Blue)",
             text,
         )
         self.assertLess(
-            text.index("1. Shop.by"),
-            text.index("2. Onliner"),
+            text.index("1. Электросила"),
+            text.index("2. Shop.by"),
         )
         self.assertLess(
-            text.index("2. Onliner"),
-            text.index("3. 21vek"),
+            text.index("2. Shop.by"),
+            text.index("3. Onliner"),
         )
-        self.assertEqual(text.count("🔗 https://example.com/"), 4)
+        self.assertEqual(text.count("🔗 https://example.com/"), 5)
 
     def test_paginates_product_variants(self) -> None:
         products = [
@@ -595,6 +638,9 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         service._search_shop_by_query = AsyncMock(
             return_value=[]
         )
+        service._search_electrosila_query = AsyncMock(
+            return_value=[]
+        )
 
         result = (
             await service.search_all_sources_by_onliner_key(
@@ -606,7 +652,13 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.offers[0].source, "5 элемент")
         self.assertEqual(
             [status.state for status in result.source_statuses],
-            ["not_found", "found", "not_found", "not_found"],
+            [
+                "not_found",
+                "found",
+                "not_found",
+                "not_found",
+                "not_found",
+            ],
         )
 
     async def test_continues_when_onliner_is_unavailable(self) -> None:
@@ -633,6 +685,9 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             return_value=[]
         )
         service._search_shop_by_query = AsyncMock(
+            return_value=[]
+        )
+        service._search_electrosila_query = AsyncMock(
             return_value=[]
         )
 
@@ -685,10 +740,13 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         service._search_shop_by_query = AsyncMock(
             side_effect=delayed([])
         )
+        service._search_electrosila_query = AsyncMock(
+            side_effect=delayed([])
+        )
 
         await service.search_all_sources_by_onliner_key("iphone17")
 
-        self.assertEqual(max_active_requests, 4)
+        self.assertEqual(max_active_requests, 5)
 
     async def test_reports_every_checked_source(self) -> None:
         service = PriceService()
@@ -714,6 +772,11 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
                 make_offer("Shop.by", canonical, 1400)
             ]
         )
+        service._search_electrosila_query = AsyncMock(
+            return_value=[
+                make_offer("Электросила", canonical, 1450)
+            ]
+        )
 
         result = (
             await service.search_all_sources_by_onliner_key(
@@ -723,18 +786,30 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [status.source for status in result.source_statuses],
-            ["Onliner", "5 элемент", "21vek", "Shop.by"],
+            [
+                "Onliner",
+                "5 элемент",
+                "21vek",
+                "Shop.by",
+                "Электросила",
+            ],
         )
         self.assertEqual(
             [status.state for status in result.source_statuses],
-            ["found", "filtered", "not_found", "found"],
+            [
+                "found",
+                "filtered",
+                "not_found",
+                "found",
+                "found",
+            ],
         )
         self.assertEqual(
             [
                 status.checked_candidates
                 for status in result.source_statuses
             ],
-            [2, 0, 0, 1],
+            [2, 0, 0, 1, 1],
         )
         self.assertTrue(
             all(
@@ -755,6 +830,10 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
             canonical_title=canonical,
         )
         service._search_shop_by_query.assert_awaited_once_with(
+            query="Духовой шкаф Bosch HBA534EB3",
+            canonical_title=canonical,
+        )
+        service._search_electrosila_query.assert_awaited_once_with(
             query="Духовой шкаф Bosch HBA534EB3",
             canonical_title=canonical,
         )
