@@ -301,6 +301,7 @@ class PriceService:
             self._timed_result(
                 self._search_zeon_query(
                     query=cross_source_query,
+                    canonical_title=canonical_title,
                 )
             ),
         )
@@ -632,18 +633,15 @@ class PriceService:
     async def _search_zeon_query(
         self,
         query: str,
+        canonical_title: str,
     ) -> list[ProductOffer]:
-        """Ищет Zeon по базовому названию выбранной модели."""
+        """Ищет Zeon по модели и запросу без масочного кода."""
 
-        return await self._cached_source_search(
-            source_name="Zeon_offers",
+        return await self._search_offer_source_by_query(
+            source=self._zeon_source,
             query=query,
+            canonical_title=canonical_title,
             limit=self._zeon_search_limit,
-            loader=partial(
-                self._zeon_source.find_offers,
-                query=query,
-                limit=self._zeon_search_limit,
-            ),
         )
 
     async def _search_offer_source_by_query(
@@ -776,23 +774,43 @@ class PriceService:
         query: str,
         canonical_title: str,
     ) -> list[str]:
-        """Добавляет варианты запроса с выбранным цветом."""
+        """Добавляет варианты цвета и запрос без масочного кода."""
 
         color = extract_color(canonical_title)
         marketing_color = display_color(canonical_title)
         queries = []
+        base_queries = [query]
+        query_without_wildcard = re.sub(
+            r"\b(?=[A-ZА-Я0-9-]*\d)"
+            r"(?=[A-ZА-Я0-9-]*XX)"
+            r"[A-ZА-Я0-9-]+\b",
+            " ",
+            query,
+            flags=re.IGNORECASE,
+        )
+        query_without_wildcard = " ".join(
+            query_without_wildcard.split()
+        )
 
-        for suffix in (color, marketing_color, None):
-            source_query = " ".join(
-                part
-                for part in (query, suffix)
-                if part
-            )
+        if (
+            query_without_wildcard
+            and query_without_wildcard.casefold()
+            != query.casefold()
+        ):
+            base_queries.append(query_without_wildcard)
 
-            if source_query.casefold() not in {
-                item.casefold() for item in queries
-            }:
-                queries.append(source_query)
+        for base_query in base_queries:
+            for suffix in (color, marketing_color, None):
+                source_query = " ".join(
+                    part
+                    for part in (base_query, suffix)
+                    if part
+                )
+
+                if source_query.casefold() not in {
+                    item.casefold() for item in queries
+                }:
+                    queries.append(source_query)
 
         return queries
 
@@ -936,6 +954,11 @@ class PriceService:
         def normalize(value: str) -> str:
             normalized = value.casefold()
             normalized = normalized.replace("ё", "е")
+            normalized = re.sub(
+                r"\bps\s*([45])\b",
+                r"playstation \1",
+                normalized,
+            )
             return re.sub(
                 r"[^a-zа-я0-9]+",
                 " ",
@@ -1165,7 +1188,10 @@ class PriceService:
                 re.search(
                     r"\s\+\s|\bbundle\b|"
                     r"\bкомплект\w*\s+(?:с|из)\b|"
-                    r"\bв\s+комплекте\s+с\b",
+                    r"\bв\s+комплекте\s+с\b|"
+                    r"\b(?:[2-9]|two|два)\s+"
+                    r"(?:controllers?|gamepads?|"
+                    r"контроллер\w*|геймпад\w*)\b",
                     normalized_value,
                 )
             )
@@ -1482,11 +1508,27 @@ class PriceService:
 
         canonical_configuration = device_configuration(canonical_title)
         candidate_configuration = device_configuration(candidate_title)
+        both_are_ps5_pro = all(
+            re.search(
+                r"\b(?:playstation\s*5|ps\s*5)\s+pro\b",
+                value,
+                flags=re.IGNORECASE,
+            )
+            for value in (canonical_title, candidate_title)
+        )
+        default_ps5_pro_digital = (
+            both_are_ps5_pro
+            and {
+                canonical_configuration,
+                candidate_configuration,
+            }.issubset({None, "digital"})
+        )
 
         if (
             canonical_configuration is not None
             and candidate_configuration is not None
             and canonical_configuration != candidate_configuration
+            and not default_ps5_pro_digital
         ):
             return "configuration"
 
@@ -1496,6 +1538,7 @@ class PriceService:
                 candidate_configuration,
             }
             and canonical_configuration != candidate_configuration
+            and not default_ps5_pro_digital
         ):
             return "configuration"
 
@@ -1558,11 +1601,20 @@ class PriceService:
             amount
             for amount, _ in canonical_memory
         }
+        canonical_number_source = canonical
+
+        for model_code in canonical_model_codes:
+            canonical_number_source = re.sub(
+                rf"\b{re.escape(model_code)}\b",
+                " ",
+                canonical_number_source,
+            )
+
         canonical_numbers = {
             number
             for number in re.findall(
                 r"\d+",
-                canonical,
+                canonical_number_source,
             )
             if (
                 number not in memory_amounts
