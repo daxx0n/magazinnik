@@ -888,22 +888,63 @@ class PriceService:
         generic_title_words = {
             "headphones",
             "laptop",
+            "monitor",
             "phone",
+            "printer",
+            "router",
             "smartphone",
+            "tablet",
             "tv",
+            "без",
             "беспроводные",
+            "блендер",
+            "бытовой",
+            "в",
+            "варочная",
+            "вертикальный",
+            "встраиваемая",
+            "для",
+            "зубная",
             "духовой",
             "игровая",
+            "и",
+            "камерой",
+            "кофеварка",
             "кофемашина",
+            "колонка",
+            "машина",
+            "микроволновая",
+            "монитор",
+            "морозильником",
+            "морозильной",
+            "на",
             "наушники",
             "ноутбук",
+            "отдельностоящая",
+            "панель",
+            "планшет",
+            "посудомоечная",
+            "портативная",
+            "принтер",
             "пылесос",
             "приставка",
+            "роутер",
             "робот",
+            "с",
+            "смарт",
             "смартфон",
+            "стиральная",
+            "сушильная",
             "телевизор",
             "телефон",
+            "умные",
+            "умная",
+            "фен",
             "холодильник",
+            "чайник",
+            "часы",
+            "щетка",
+            "электрическая",
             "шкаф",
             "электрический",
         }
@@ -913,7 +954,7 @@ class PriceService:
                 token
                 for token in canonical_tokens
                 if (
-                    token.isalpha()
+                    re.fullmatch(r"[a-z]+", token)
                     and token
                     not in generic_title_words
                 )
@@ -921,31 +962,97 @@ class PriceService:
             None,
         )
 
+        if canonical_brand is None:
+            canonical_brand = next(
+                (
+                    token
+                    for token in canonical_tokens
+                    if (
+                        token.isalpha()
+                        and token not in generic_title_words
+                    )
+                ),
+                None,
+            )
+
+        brand_alias_groups = (
+            {"apple", "airpods", "imac", "ipad", "iphone", "macbook"},
+            {"google", "pixel"},
+            {"hewlett", "hp"},
+            {"meta", "oculus"},
+            {"microsoft", "surface", "xbox"},
+            {"playstation", "sony"},
+            {"poco", "redmi", "xiaomi"},
+        )
+        canonical_brand_aliases = next(
+            (
+                aliases
+                for aliases in brand_alias_groups
+                if canonical_brand in aliases
+            ),
+            {canonical_brand} if canonical_brand else set(),
+        )
+        candidate_brand = next(
+            (
+                token
+                for token in candidate.split()
+                if (
+                    re.fullmatch(r"[a-z]+", token)
+                    and token not in generic_title_words
+                )
+            ),
+            None,
+        )
+
+        if candidate_brand is None:
+            candidate_brand = next(
+                (
+                    token
+                    for token in candidate.split()
+                    if (
+                        token.isalpha()
+                        and token not in generic_title_words
+                    )
+                ),
+                None,
+            )
+
         if (
             canonical_brand
-            and canonical_brand
-            not in candidate_tokens
+            and candidate_brand not in canonical_brand_aliases
         ):
             return "brand"
 
         accessory_markers = {
             "adapter",
+            "aмбушюр",
             "case",
             "cable",
             "charger",
+            "controller",
             "cover",
+            "earbud",
+            "filter",
             "mount",
             "protector",
             "strap",
             "адаптер",
+            "аккумулятор",
+            "амбушюр",
             "держател",
+            "дисковод",
             "зарядн",
+            "геймпад",
             "кабел",
+            "контроллер",
             "креплен",
             "накладк",
+            "насадк",
             "пленк",
+            "пульт",
             "ремеш",
             "стекл",
+            "фильтр",
             "чехол",
         }
 
@@ -956,11 +1063,8 @@ class PriceService:
                 for marker in accessory_markers
             )
 
-        if (
-            is_accessory(candidate)
-            and not is_accessory(canonical)
-        ):
-            return "accessory"
+        candidate_is_accessory = is_accessory(candidate)
+        canonical_is_accessory = is_accessory(canonical)
 
         def product_condition(value: str) -> str:
             normalized_value = value.casefold().replace("ё", "е")
@@ -989,7 +1093,8 @@ class PriceService:
         def is_bundle(value: str) -> bool:
             normalized_value = value.casefold().replace("ё", "е")
             normalized_value = re.sub(
-                r"\b(?:nano\s*)?sim\s*\+\s*e\s*sim\b",
+                r"\b(?:(?:nano\s*)?sim\s*\+\s*e\s*sim|"
+                r"gps\s*\+\s*cellular)\b",
                 " ",
                 normalized_value,
             )
@@ -1004,6 +1109,9 @@ class PriceService:
 
         if is_bundle(canonical_title) != is_bundle(candidate_title):
             return "bundle"
+
+        if candidate_is_accessory and not canonical_is_accessory:
+            return "accessory"
 
         canonical_color = extract_color_key(
             canonical_title
@@ -1080,6 +1188,24 @@ class PriceService:
                         )
                     )
                 ):
+                    codes.add(compact_code)
+
+            # Один и тот же код встречается как ECAM 22.110.B,
+            # ECAM22.110.B и ECAM 22.110 B. Числовой хвост с
+            # буквенным суффиксом должен совпадать независимо
+            # от пробела перед последней буквой.
+            for spaced_code in re.findall(
+                r"\b\d{1,4}[-_/.\s]+\d{1,4}"
+                r"[-_/.\s]+[a-zа-я]\b",
+                original_value.casefold(),
+            ):
+                compact_code = re.sub(
+                    r"[^a-zа-я0-9]",
+                    "",
+                    spaced_code,
+                )
+
+                if len(compact_code) >= 5:
                     codes.add(compact_code)
 
             return codes
@@ -1242,6 +1368,129 @@ class PriceService:
         ):
             return "memory"
 
+        def release_years(value: str) -> set[str]:
+            return set(re.findall(r"\b20(?:1\d|2\d)\b", value))
+
+        canonical_years = release_years(canonical_title)
+        candidate_years = release_years(candidate_title)
+
+        if (
+            canonical_years
+            and candidate_years
+            and canonical_years != candidate_years
+        ):
+            return "year"
+
+        def device_configuration(value: str) -> str | None:
+            normalized_value = re.sub(
+                r"[^a-zа-я0-9]+",
+                " ",
+                value.casefold().replace("ё", "е"),
+            ).strip()
+
+            if re.search(
+                r"\b(?:digital\s+edition|без\s+дисковод\w*)\b",
+                normalized_value,
+            ):
+                return "digital"
+
+            if re.search(
+                r"\bс\s+дисковод\w*\b",
+                normalized_value,
+            ):
+                return "disc"
+
+            if re.search(r"\bgps\s+cellular\b", normalized_value):
+                return "gps_cellular"
+
+            if re.search(r"\bgps\b", normalized_value):
+                return "gps"
+
+            if re.search(
+                r"\b(?:cellular|lte|5g)\b",
+                normalized_value,
+            ):
+                return "cellular"
+
+            if re.search(r"\bwi\s*fi\b", normalized_value):
+                return "wifi"
+
+            return None
+
+        canonical_configuration = device_configuration(canonical_title)
+        candidate_configuration = device_configuration(candidate_title)
+
+        if (
+            canonical_configuration is not None
+            and candidate_configuration is not None
+            and canonical_configuration != candidate_configuration
+        ):
+            return "configuration"
+
+        if (
+            "digital" in {
+                canonical_configuration,
+                candidate_configuration,
+            }
+            and canonical_configuration != candidate_configuration
+        ):
+            return "configuration"
+
+        def connector_configuration(value: str) -> str | None:
+            normalized_value = re.sub(
+                r"[^a-zа-я0-9]+",
+                " ",
+                value.casefold().replace("ё", "е"),
+            ).strip()
+
+            if re.search(r"\blightning\b", normalized_value):
+                return "lightning"
+
+            if re.search(
+                r"\busb\s*(?:type\s*)?c\b",
+                normalized_value,
+            ):
+                return "usb_c"
+
+            return None
+
+        canonical_connector = connector_configuration(canonical_title)
+        candidate_connector = connector_configuration(candidate_title)
+
+        if (
+            canonical_connector is not None
+            and candidate_connector is not None
+            and canonical_connector != candidate_connector
+        ):
+            return "configuration"
+
+        def voice_configuration(value: str) -> str | None:
+            normalized_value = value.casefold().replace("ё", "е")
+
+            if re.search(
+                r"\b(?:русск\w*|russian)\s+озвучк\w*\b",
+                normalized_value,
+            ):
+                return "voice_ru"
+
+            if re.search(
+                r"\b(?:английск\w*|english)\s+озвучк\w*\b",
+                normalized_value,
+            ):
+                return "voice_en"
+
+            return None
+
+        canonical_voice = voice_configuration(canonical_title)
+        candidate_voice = voice_configuration(candidate_title)
+
+        if (
+            canonical_voice is not None
+            and candidate_voice is not None
+            and canonical_voice != candidate_voice
+        ):
+            return "configuration"
+
         memory_amounts = {
             amount
             for amount, _ in canonical_memory
@@ -1319,10 +1568,39 @@ class PriceService:
                 "air",
                 "mini",
                 "lite",
+                "xl",
                 "fe",
                 "e",
             }
             return tokens & markers
+
+        def has_model_plus(value: str) -> bool:
+            """Отличает Max/Pro от Max+/Pro+ без путаницы с bundle."""
+
+            return bool(re.search(r"[a-zа-я0-9]\+", value, re.I))
+
+        if has_model_plus(canonical_title) != has_model_plus(
+            candidate_title
+        ):
+            return "version"
+
+        def xbox_series_variant(value: str) -> str | None:
+            match = re.search(
+                r"\bxbox\s+series\s+([xs])\b",
+                value,
+                re.I,
+            )
+            return match.group(1).casefold() if match else None
+
+        canonical_xbox_variant = xbox_series_variant(canonical_title)
+        candidate_xbox_variant = xbox_series_variant(candidate_title)
+
+        if (
+            canonical_xbox_variant is not None
+            and candidate_xbox_variant is not None
+            and canonical_xbox_variant != candidate_xbox_variant
+        ):
+            return "version"
 
         if (
             version_tokens(canonical)
