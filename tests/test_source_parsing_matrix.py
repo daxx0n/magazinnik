@@ -4,6 +4,7 @@ from app.sources.electrosila import ElectrosilaSource
 from app.sources.five_element import FiveElementSource
 from app.sources.onliner import OnlinerSource
 from app.sources.twenty_one_vek import TwentyOneVekSource
+from app.sources.zeon import ZeonSource
 
 
 class SourceParsingMatrixTest(unittest.TestCase):
@@ -129,6 +130,45 @@ class SourceParsingMatrixTest(unittest.TestCase):
                 </div>
                 """
                 offers = source._parse_search_results(html, limit=1)
+
+                self.assertEqual(len(offers), 1)
+                self.assertEqual(offers[0].title, title)
+                self.assertGreater(offers[0].price, 0)
+
+    def test_zeon_keeps_titles_and_club_prices(self) -> None:
+        source = ZeonSource()
+        cases = [
+            (
+                "Телефон Apple iPhone 17 Pro 256GB "
+                "(глубокий синий)",
+                "3 584,30",
+            ),
+            (
+                "Электрический духовой шкаф Bosch "
+                "Serie 4 HBA534EB3",
+                "1 197,70",
+            ),
+            ("Телевизор Samsung UE43U8000FUXRU", "1 054,00"),
+        ]
+
+        for index, (title, price) in enumerate(cases):
+            with self.subTest(title=title):
+                html = f"""
+                <div class="catalog-item">
+                  <div class="catalog-item-title">
+                    <a href="https://www.zeon.by/product/item-{index}/">
+                      {title}
+                    </a>
+                  </div>
+                  <span class="catalog-item-stock instock">В наличии</span>
+                  <div class="catalog-item-pricemini">{price} руб*</div>
+                </div>
+                """
+                offers = source._parse_page(
+                    html,
+                    "https://www.zeon.by/search/?q=model",
+                    limit=1,
+                )
 
                 self.assertEqual(len(offers), 1)
                 self.assertEqual(offers[0].title, title)
