@@ -8,6 +8,7 @@ import httpx
 from app.models.category import ProductCategory
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
+from app.services.product_variants import extract_color
 from app.sources import (
     InvalidProductUrlError,
     ProductNotFoundError,
@@ -262,13 +263,15 @@ class OnlinerSource:
                 else:
                     pages_without_primary_products = 0
 
-                # Поиск Onliner после основных товаров может
-                # продолжаться аксессуарами других категорий.
-                # Несколько страниц без основной категории означают,
-                # что релевантная часть выдачи закончилась.
-                empty_page_limit = 3 if category else 2
-
-                if pages_without_primary_products >= empty_page_limit:
+                # В обычном поиске после основных товаров обычно
+                # идут аксессуары, поэтому две пустые страницы
+                # завершают обход. При явно выбранной категории
+                # результаты могут быть разбросаны по всей выдаче:
+                # её нужно дочитать до последней страницы.
+                if (
+                    category is None
+                    and pages_without_primary_products >= 2
+                ):
                     break
 
                 page += 1
@@ -398,14 +401,13 @@ class OnlinerSource:
     def _base_variant_title(title: str) -> str:
         """Убирает цвет из конца названия варианта."""
 
+        if extract_color(title) is None:
+            return title
+
         return re.sub(
-            r"\s*\([^()]*(?:цвет|черн|бел|син|"
-            r"голуб|зелен|желт|красн|фиолет|"
-            r"сирен|лилов|розов|оранж|графит|"
-            r"серебр|золот|титан)[^()]*\)\s*$",
+            r"\s*\([^()]*\)\s*$",
             "",
             title,
-            flags=re.IGNORECASE,
         )
 
     @staticmethod
@@ -415,7 +417,20 @@ class OnlinerSource:
     ) -> list[ProductCandidate]:
         """Сортирует поколения и версии известных семейств."""
 
-        if "iphone" not in query.casefold():
+        iphone_candidates = [
+            candidate
+            for candidate in candidates
+            if re.search(
+                r"\biphone\b",
+                candidate.title,
+                re.IGNORECASE,
+            )
+        ]
+
+        if (
+            "iphone" not in query.casefold()
+            and len(iphone_candidates) != len(candidates)
+        ):
             return candidates
 
         generations = [
@@ -423,7 +438,7 @@ class OnlinerSource:
             for candidate in candidates
             if (
                 match := re.search(
-                    r"\biphone\s+(\d{1,2})\b",
+                    r"\biphone\s+(\d{1,2})(?:e)?\b",
                     candidate.title.casefold(),
                 )
             )
@@ -438,7 +453,7 @@ class OnlinerSource:
         ) -> tuple[int, int, int, str]:
             title = candidate.title.casefold()
             generation_match = re.search(
-                r"\biphone\s+(\d{1,2})\b",
+                r"\biphone\s+(\d{1,2})(?:e)?\b",
                 title,
             )
             generation = (
@@ -455,24 +470,26 @@ class OnlinerSource:
             )
 
             if "pro max" in title:
-                version_rank = 2
+                version_rank = 3
             elif re.search(r"\bpro\b", title):
+                version_rank = 2
+            elif re.search(r"\biphone\s+\d{1,2}e\b", title):
                 version_rank = 1
             elif re.search(r"\bplus\b", title):
-                version_rank = 3
-            elif re.search(r"\bair\b", title):
                 version_rank = 4
+            elif re.search(r"\bair\b", title):
+                version_rank = 5
             else:
                 version_rank = 0
 
-            sim_rank = (
-                1
-                if re.search(
-                    r"\bdual\s*sim\b",
-                    title,
-                )
-                else 0
-            )
+            if re.search(r"\bdual\s+e\s*sim\b", title):
+                sim_rank = 2
+            elif re.search(r"\bdual\s*sim\b", title):
+                sim_rank = 1
+            elif re.search(r"\be\s*sim\b", title):
+                sim_rank = 3
+            else:
+                sim_rank = 0
 
             return (
                 -generation,
