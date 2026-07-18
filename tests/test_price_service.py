@@ -45,6 +45,14 @@ class ModelMatchingTest(unittest.TestCase):
                     "Apple iPhone 15 Pro 256GB",
                 ],
             ),
+            (
+                "Apple iPhone 17 Pro 256GB (глубокий синий)",
+                [
+                    "Apple iPhone 17 Pro 256GB глубокий синий",
+                    "Apple iPhone 17 Pro 256GB Deep Blue",
+                    "Apple iPhone 17 Pro 256GB",
+                ],
+            ),
         ]
 
         for title, expected in cases:
@@ -274,6 +282,16 @@ class ModelMatchingTest(unittest.TestCase):
             (
                 "Apple iPhone 17 512GB (фиолетовый)",
                 "Apple iPhone 17 512GB Lavender",
+            ),
+            (
+                "Apple iPhone 17 Pro 256GB (глубокий синий)",
+                "Смартфон Apple iPhone 17 Pro 256GB Deep Blue "
+                "(MG8J4KH/A)",
+            ),
+            (
+                "Apple iPhone 17 Pro 256GB (глубокий синий)",
+                "Смартфон Apple iPhone 17 Pro 256GB "
+                "(темно-синий)",
             ),
             (
                 "Samsung Galaxy A55 8GB/256GB",
