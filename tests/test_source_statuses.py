@@ -11,6 +11,7 @@ from app.handlers.search import (
 )
 from app.services.price_service import PriceService
 from app.sources import ProductNotFoundError
+from app.sources.five_element import FiveElementSource
 
 
 def make_offer(
@@ -29,6 +30,22 @@ def make_offer(
 
 
 class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
+    def test_keeps_five_element_display_item_candidate(self) -> None:
+        candidate = FiveElementSource._parse_candidate(
+            {
+                "id": "iphone-17-black",
+                "name": "Apple iPhone 17 512GB Black",
+                "link_url": "/products/iphone-17-black",
+                "available": False,
+            }
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(
+            candidate.title,
+            "Apple iPhone 17 512GB Black",
+        )
+
     async def test_searches_five_element_with_color_variants(self) -> None:
         service = PriceService()
         canonical = "Apple iPhone 17 512GB (черный)"
