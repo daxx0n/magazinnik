@@ -17,21 +17,26 @@ from app.models.offer import ProductOffer
 from app.services.catalog_adapter import CatalogOfferAdapter
 from app.services.catalog_storage import JsonCatalogStorage
 from app.services.master_catalog import MasterCatalog
+from app.services.sqlite_catalog_storage import SqliteCatalogStorage
 
 
 logger = logging.getLogger(__name__)
+
+
+CatalogStorage = JsonCatalogStorage | SqliteCatalogStorage
 
 
 class CatalogService:
     """Координирует адаптацию, дедупликацию и сохранение офферов."""
 
     _storage_path_env = "CATALOG_STORAGE_PATH"
+    _database_path_env = "CATALOG_DATABASE_PATH"
 
     def __init__(
         self,
         catalog: MasterCatalog | None = None,
         adapter: CatalogOfferAdapter | None = None,
-        storage: JsonCatalogStorage | None = None,
+        storage: CatalogStorage | None = None,
         restore_on_start: bool = True,
     ) -> None:
         self._catalog = catalog or MasterCatalog()
@@ -61,6 +66,22 @@ class CatalogService:
         """Возвращает неизменяемый снимок накопленных метрик."""
 
         return self._metrics
+
+    @property
+    def storage_path(self) -> str | None:
+        """Возвращает активный путь постоянного хранилища."""
+
+        return str(self._storage.path) if self._storage is not None else None
+
+    @property
+    def storage_backend(self) -> str:
+        """Показывает выбранный backend для диагностики."""
+
+        if isinstance(self._storage, SqliteCatalogStorage):
+            return "sqlite"
+        if isinstance(self._storage, JsonCatalogStorage):
+            return "json"
+        return "memory"
 
     def ingest_offer(self, offer: ProductOffer) -> MasterCatalogProduct:
         result = self._ingest(offer)
@@ -213,11 +234,38 @@ class CatalogService:
         )
 
     @classmethod
-    def _storage_from_environment(cls) -> JsonCatalogStorage | None:
-        raw_path = os.getenv(cls._storage_path_env, "").strip()
-        if not raw_path:
-            return None
-        return JsonCatalogStorage(raw_path)
+    def _storage_from_environment(cls) -> CatalogStorage | None:
+        database_path = os.getenv(cls._database_path_env, "").strip()
+        json_path = os.getenv(cls._storage_path_env, "").strip()
+
+        if database_path:
+            storage = SqliteCatalogStorage(database_path)
+            if json_path:
+                try:
+                    imported = storage.import_json_if_empty(
+                        JsonCatalogStorage(json_path)
+                    )
+                except Exception:
+                    logger.exception(
+                        "Catalog JSON to SQLite migration failed: "
+                        "json=%s sqlite=%s",
+                        json_path,
+                        database_path,
+                    )
+                else:
+                    if imported:
+                        logger.info(
+                            "Catalog JSON imported into SQLite: "
+                            "products=%d json=%s sqlite=%s",
+                            imported,
+                            json_path,
+                            database_path,
+                        )
+            return storage
+
+        if json_path:
+            return JsonCatalogStorage(json_path)
+        return None
 
     @staticmethod
     def _build_report(
