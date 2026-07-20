@@ -206,7 +206,11 @@ async def handle_price_alert(callback: CallbackQuery) -> None:
         get_price_history_repository().toggle_alert,
         chat_id,
         product_key,
-        comparison.product_title or cheapest.title,
+        (
+            comparison.master_product_title
+            or comparison.product_title
+            or cheapest.title
+        ),
         comparison.query or comparison.product_title,
         float(cheapest.price),
         cheapest.currency,
@@ -524,10 +528,14 @@ async def load_product_comparison(
             comparison=comparison,
         )
 
+    display_title = (
+        comparison.master_product_title
+        or comparison.product_title
+    )
     await asyncio.to_thread(
         get_price_history_repository().record_offers,
         product_key,
-        comparison.product_title,
+        display_title,
         comparison.offers,
     )
 
@@ -538,6 +546,12 @@ async def load_product_comparison(
             comparison.source_statuses
         ),
         product_key=product_key,
+        product_title=(
+            comparison.master_product_title
+            if comparison.catalog_presentation
+            else None
+        ),
+        grouped=comparison.catalog_presentation,
     )
 
 
@@ -1605,6 +1619,8 @@ async def show_comparison(
         list[SourceSearchStatus] | None
     ) = None,
     product_key: str | None = None,
+    product_title: str | None = None,
+    grouped: bool = False,
 ) -> None:
     """Показывает сравнение площадок."""
 
@@ -1614,11 +1630,19 @@ async def show_comparison(
         )
         return
 
-    lines = [
-        "🏆 Сравнение цен",
-        f"Найдено предложений: {len(offers)}",
-        "",
-    ]
+    lines = ["🏆 Сравнение цен"]
+
+    if product_title:
+        lines.append(
+            f"📱 {display_product_title(product_title)}"
+        )
+
+    lines.extend(
+        [
+            f"Найдено предложений: {len(offers)}",
+            "",
+        ]
+    )
 
     for position, offer in enumerate(
         offers,
@@ -1643,9 +1667,10 @@ async def show_comparison(
                 f"🏪 {offer.seller}"
             )
 
-        lines.append(
-            f"📱 {display_product_title(offer.title)}"
-        )
+        if not grouped:
+            lines.append(
+                f"📱 {display_product_title(offer.title)}"
+            )
 
         lines.append(
             f"💰 {offer.price:.2f} "
@@ -1699,8 +1724,13 @@ async def show_comparison(
             ),
             "",
             (
-                "⚠️ Убедись, что ссылки ведут "
-                "на одинаковую модификацию товара."
+                "ℹ️ Предложения объединены в одну карточку "
+                "по модели и варианту товара."
+                if grouped
+                else (
+                    "⚠️ Убедись, что ссылки ведут "
+                    "на одинаковую модификацию товара."
+                )
             ),
         ]
     )
@@ -1763,7 +1793,11 @@ async def check_price_alerts(bot: Bot) -> None:
                 await asyncio.to_thread(
                     repository.record_offers,
                     alert.product_key,
-                    comparison.product_title or alert.title,
+                    (
+                        comparison.master_product_title
+                        or comparison.product_title
+                        or alert.title
+                    ),
                     comparison.offers,
                 )
 
@@ -1892,7 +1926,10 @@ def format_comparison_diagnostics(
         "version": "версия модели",
         "year": "год модели",
     }
-    product_title = comparison.product_title
+    product_title = (
+        comparison.master_product_title
+        or comparison.product_title
+    )
 
     if not product_title and comparison.offers:
         product_title = comparison.offers[0].title
@@ -1901,6 +1938,12 @@ def format_comparison_diagnostics(
         "🧪 Диагностика последнего сравнения",
         f"📱 {display_product_title(product_title) or 'Не определён'}",
     ]
+
+    if comparison.catalog_presentation:
+        lines.append(
+            "🧩 Мастер-карточка: "
+            f"{comparison.master_product_key or 'без ключа'}"
+        )
 
     if comparison.query:
         lines.append(f"🔎 Запрос: {comparison.query}")

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import re
 import time
 from collections import OrderedDict
@@ -8,6 +9,10 @@ from datetime import datetime
 from functools import partial
 from typing import Any, TypeVar
 
+from app.models.catalog import (
+    CatalogIngestReport,
+    MasterCatalogProduct,
+)
 from app.models.category import ProductCategory
 from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
@@ -55,6 +60,7 @@ class PriceService:
     def __init__(
         self,
         catalog_service: CatalogService | None = None,
+        catalog_presentation_enabled: bool | None = None,
     ) -> None:
         self._onliner_candidates: OrderedDict[
             str,
@@ -81,6 +87,13 @@ class PriceService:
 
         self._zeon_source = ZeonSource()
         self._catalog_service = catalog_service or CatalogService()
+        self._catalog_presentation_enabled = (
+            catalog_presentation_enabled
+            if catalog_presentation_enabled is not None
+            else self._env_flag(
+                "MASTER_CATALOG_PRESENTATION_ENABLED"
+            )
+        )
 
         self._source_search_cache: OrderedDict[
             tuple[str, str, int],
@@ -472,7 +485,12 @@ class PriceService:
                 )
             )
 
-        self._ingest_catalog_offers(combined_offers)
+        catalog_report = self._ingest_catalog_offers(
+            combined_offers
+        )
+        master_product = self._master_product_for_report(
+            catalog_report
+        )
         offers = self._prepare_aggregate_offers(
             offers=combined_offers,
         )
@@ -490,12 +508,25 @@ class PriceService:
                 "%d.%m.%Y %H:%M:%S"
             ),
             product_key=product_key,
+            master_product_key=(
+                master_product.key
+                if master_product is not None
+                else ""
+            ),
+            master_product_title=(
+                master_product.title
+                if master_product is not None
+                else ""
+            ),
+            catalog_presentation=(
+                master_product is not None
+            ),
         )
 
     def _ingest_catalog_offers(
         self,
         offers: Iterable[ProductOffer],
-    ) -> None:
+    ) -> CatalogIngestReport | None:
         """Обновляет мастер-каталог, не влияя на основной поиск."""
 
         try:
@@ -507,7 +538,7 @@ class PriceService:
             logger.exception(
                 "Master catalog shadow ingest failed"
             )
-            return
+            return None
 
         logger.info(
             "Master catalog shadow ingest: total=%d "
@@ -518,6 +549,39 @@ class PriceService:
             report.updated_offers,
             len(report.product_keys),
         )
+        return report
+
+    def _master_product_for_report(
+        self,
+        report: CatalogIngestReport | None,
+    ) -> MasterCatalogProduct | None:
+        """Включает мастер-представление только при одном совпадении."""
+
+        if (
+            not self._catalog_presentation_enabled
+            or report is None
+            or len(report.product_keys) != 1
+        ):
+            return None
+
+        try:
+            return self._catalog_service.get_product(
+                report.product_keys[0]
+            )
+        except Exception:
+            logger.exception(
+                "Master catalog presentation read failed"
+            )
+            return None
+
+    @staticmethod
+    def _env_flag(name: str) -> bool:
+        return os.getenv(name, "").strip().casefold() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
 
     @staticmethod
     async def _timed_result(

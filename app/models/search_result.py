@@ -36,3 +36,6 @@ class ComparisonResult:
     duration_seconds: float = 0.0
     completed_at: str = ""
     product_key: str = ""
+    master_product_key: str = ""
+    master_product_title: str = ""
+    catalog_presentation: bool = False
