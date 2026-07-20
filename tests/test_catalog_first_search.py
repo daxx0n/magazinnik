@@ -139,7 +139,10 @@ class CatalogFirstSearchTest(unittest.IsolatedAsyncioTestCase):
                 products[0].key
             )
 
-        live_search.assert_awaited_once_with(live_candidate.key)
+        live_search.assert_awaited_once_with(
+            live_candidate.key,
+            original_query="Bosch HBA534EB3",
+        )
         self.assertEqual(result.product_key, "catalog:product-1")
         self.assertEqual(result.master_product_key, "product-1")
         self.assertEqual(result.master_product_title, "Bosch HBA534EB3")
