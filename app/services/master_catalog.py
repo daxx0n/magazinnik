@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from app.models.catalog import (
-    CatalogMetrics,
+    CatalogSnapshotMetrics,
     CatalogUpsertAction,
     CatalogUpsertResult,
     ExternalCatalogItem,
@@ -191,7 +191,7 @@ class MasterCatalog:
         self,
         now: datetime | None = None,
         stale_after: timedelta = timedelta(hours=24),
-    ) -> CatalogMetrics:
+    ) -> CatalogSnapshotMetrics:
         """Считает дедупликацию, качество матчей и свежесть офферов."""
 
         reference_time = self._aware_datetime(
@@ -237,7 +237,7 @@ class MasterCatalog:
             if offer_count
             else 0.0
         )
-        return CatalogMetrics(
+        return CatalogSnapshotMetrics(
             product_count=product_count,
             offer_count=offer_count,
             merged_offer_count=merged_offer_count,
