@@ -1,6 +1,7 @@
 import logging
 import os
 from collections.abc import Iterable
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -9,6 +10,7 @@ from app.models.catalog import (
     CatalogSnapshotMetrics,
     CatalogUpsertAction,
     CatalogUpsertResult,
+    ExternalCatalogItem,
     MasterCatalogProduct,
     MatchReview,
 )
@@ -107,6 +109,28 @@ class CatalogService:
     ) -> CatalogIngestReport:
         self.ingest_offers(offers)
         return self._last_report
+
+    def ingest_external_items_with_report(
+        self,
+        items: Iterable[ExternalCatalogItem],
+    ) -> CatalogIngestReport:
+        """Транзакционно импортирует структурированные внешние товары."""
+
+        snapshot = deepcopy(self._catalog.products)
+        try:
+            results = tuple(
+                self._catalog.upsert_with_result(item)
+                for item in items
+            )
+            report = self._build_report(results)
+            self._persist()
+        except Exception:
+            self._catalog.restore(snapshot)
+            raise
+
+        self._last_report = report
+        self._record_report(report)
+        return report
 
     def search(self, query: str) -> list[MasterCatalogProduct]:
         """Ищет по названиям, нормализованной модели, MPN и EAN."""
