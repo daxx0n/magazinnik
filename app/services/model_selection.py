@@ -76,6 +76,18 @@ _COLOR_ALIAS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
 )
+_COLOR_DESCRIPTOR_PATTERN = re.compile(
+    r"^(?:"
+    r"natural|desert|space|cloud|mist|sky|rose|cosmic|matte|"
+    r"storm|glacier|phantom|awesome|bora|icy|deep|dark|light|"
+    r"black|white|blue|green|gold|silver|titanium|graphite|"
+    r"природн\w*|пустынн\w*|космическ\w*|матов\w*|"
+    r"темн\w*|светл\w*|глубок\w*|ледян\w*|"
+    r"черн\w*|бел\w*|син\w*|зелен\w*|золот\w*|"
+    r"серебр\w*|титан\w*|графитов\w*"
+    r")$",
+    re.IGNORECASE,
+)
 
 
 def requested_color_key(value: str | None) -> str | None:
@@ -255,7 +267,7 @@ def _strip_color_suffix(title: str) -> str:
 
 
 def _color_suffix(title: str) -> str | None:
-    """Находит цвет в последних словах через общий словарь product_variants."""
+    """Находит конечную цветовую фразу, не принимая Pro/Plus за цвет."""
 
     full_color = requested_color_key(title)
     if full_color is None:
@@ -268,8 +280,23 @@ def _color_suffix(title: str) -> str | None:
         suffix = raw_suffix.strip("()[]{}.,;:-_/ ")
         if not suffix or any(character.isdigit() for character in suffix):
             continue
-        if requested_color_key(suffix) == full_color:
-            return raw_suffix
+        if requested_color_key(suffix) != full_color:
+            continue
+
+        start = len(tokens) - width
+        while start > 0:
+            previous = tokens[start - 1].strip("()[]{}.,;:-_/ ")
+            if (
+                not previous
+                or any(character.isdigit() for character in previous)
+                or _COLOR_DESCRIPTOR_PATTERN.fullmatch(previous) is None
+            ):
+                break
+            expanded = " ".join(tokens[start - 1:])
+            if requested_color_key(expanded) != full_color:
+                break
+            start -= 1
+        return " ".join(tokens[start:])
     return None
 
 
