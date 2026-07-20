@@ -1,6 +1,7 @@
 import logging
 import os
 from collections.abc import Iterable
+from dataclasses import replace
 
 from app.models.catalog import (
     CatalogIngestReport,
@@ -99,16 +100,14 @@ class CatalogService:
             ),
             None,
         )
-        self._metrics = CatalogMetrics(
-            **{
-                **self._metrics.__dict__,
-                "lookup_hits": (
-                    self._metrics.lookup_hits + (product is not None)
-                ),
-                "lookup_misses": (
-                    self._metrics.lookup_misses + (product is None)
-                ),
-            }
+        self._metrics = replace(
+            self._metrics,
+            lookup_hits=(
+                self._metrics.lookup_hits + int(product is not None)
+            ),
+            lookup_misses=(
+                self._metrics.lookup_misses + int(product is None)
+            ),
         )
         return product
 
@@ -153,13 +152,13 @@ class CatalogService:
                 current.updated_offers + report.updated_offers
             ),
             single_product_batches=(
-                current.single_product_batches + (product_count == 1)
+                current.single_product_batches + int(product_count == 1)
             ),
             ambiguous_batches=(
-                current.ambiguous_batches + (product_count > 1)
+                current.ambiguous_batches + int(product_count > 1)
             ),
             empty_batches=(
-                current.empty_batches + (report.total_offers == 0)
+                current.empty_batches + int(report.total_offers == 0)
             ),
             lookup_hits=current.lookup_hits,
             lookup_misses=current.lookup_misses,
