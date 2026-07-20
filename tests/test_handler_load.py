@@ -93,13 +93,13 @@ class HandlerLoadTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(calls, 1)
         self.assertEqual(renderer.await_count, 50)
-        self.assertEqual(history.record_offers.call_count, 50)
+        self.assertEqual(history.record_offers.call_count, 1)
         self.assertEqual(len(search.comparison_diagnostics), 50)
         for index in range(50):
             stored = search.comparison_diagnostics[(10_000 + index, index)]
             self.assertEqual(stored.query, f"Pixel request {index}")
 
-    def test_foreign_user_cannot_open_callback_session(self) -> None:
+    def test_foreign_user_cannot_open_or_delete_callback_session(self) -> None:
         product = ProductCandidate(
             key="pixel8",
             title="Google Pixel 8",
@@ -111,14 +111,25 @@ class HandlerLoadTest(unittest.IsolatedAsyncioTestCase):
             owner_chat_id=100,
             owner_user_id=200,
         )
-        callback = Mock()
-        callback.message.chat.id = 100
-        callback.from_user.id = 201
+        foreign_callback = Mock()
+        foreign_callback.message.chat.id = 100
+        foreign_callback.from_user.id = 201
 
         self.assertIsNone(
-            search.authorized_product_search(callback, session_id)
+            search.authorized_product_search(
+                foreign_callback,
+                session_id,
+            )
         )
-        self.assertNotIn(session_id, search.product_searches)
+        self.assertIn(session_id, search.product_searches)
+
+        owner_callback = Mock()
+        owner_callback.message.chat.id = 100
+        owner_callback.from_user.id = 200
+        self.assertEqual(
+            search.authorized_product_search(owner_callback, session_id),
+            [product],
+        )
 
     def test_owner_callback_refreshes_lru_session(self) -> None:
         product = ProductCandidate(
