@@ -6,6 +6,12 @@ from aiogram import Bot, Dispatcher
 
 from app.config import load_config
 from app.handlers import catalog, common, search
+from app.services.catalog_first_search import CatalogFirstPriceService
+
+
+search.price_service = CatalogFirstPriceService(
+    catalog_service=search.price_service._catalog_service,
+)
 
 
 async def main() -> None:
