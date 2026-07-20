@@ -12,6 +12,14 @@ class MatchLevel(StrEnum):
     REJECTED = "rejected"
 
 
+class CatalogUpsertAction(StrEnum):
+    """Результат добавления внешнего предложения в мастер-каталог."""
+
+    CREATED = "created"
+    MERGED = "merged"
+    UPDATED = "updated"
+
+
 @dataclass(frozen=True, slots=True)
 class ProductIdentity:
     """Нормализованные признаки конкретной модификации товара."""
@@ -60,3 +68,22 @@ class MasterCatalogProduct:
     title: str
     identity: ProductIdentity
     offers: list[ExternalCatalogItem] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogUpsertResult:
+    """Мастер-карточка и действие, выполненное при upsert."""
+
+    product: MasterCatalogProduct
+    action: CatalogUpsertAction
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogIngestReport:
+    """Сводка пакетной загрузки предложений в мастер-каталог."""
+
+    total_offers: int
+    created_products: int
+    merged_offers: int
+    updated_offers: int
+    product_keys: tuple[str, ...] = ()
