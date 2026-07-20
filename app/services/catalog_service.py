@@ -1,3 +1,5 @@
+import logging
+import os
 from collections.abc import Iterable
 
 from app.models.catalog import (
@@ -12,8 +14,13 @@ from app.services.catalog_storage import JsonCatalogStorage
 from app.services.master_catalog import MasterCatalog
 
 
+logger = logging.getLogger(__name__)
+
+
 class CatalogService:
     """Координирует адаптацию, дедупликацию и сохранение офферов."""
+
+    _storage_path_env = "CATALOG_STORAGE_PATH"
 
     def __init__(
         self,
@@ -24,7 +31,7 @@ class CatalogService:
     ) -> None:
         self._catalog = catalog or MasterCatalog()
         self._adapter = adapter or CatalogOfferAdapter()
-        self._storage = storage
+        self._storage = storage or self._storage_from_environment()
         self._last_report = CatalogIngestReport(
             total_offers=0,
             created_products=0,
@@ -33,7 +40,7 @@ class CatalogService:
         )
 
         if self._storage is not None and restore_on_start:
-            self._catalog.restore(self._storage.load())
+            self._restore_fail_open()
 
     @property
     def catalog(self) -> MasterCatalog:
@@ -81,6 +88,26 @@ class CatalogService:
         if self._storage is None:
             return
         self._storage.save(self._catalog.products)
+
+    def _restore_fail_open(self) -> None:
+        if self._storage is None:
+            return
+
+        try:
+            products = self._storage.load()
+            self._catalog.restore(products)
+        except Exception:
+            logger.exception(
+                "Catalog snapshot restore failed: path=%s",
+                self._storage.path,
+            )
+
+    @classmethod
+    def _storage_from_environment(cls) -> JsonCatalogStorage | None:
+        raw_path = os.getenv(cls._storage_path_env, "").strip()
+        if not raw_path:
+            return None
+        return JsonCatalogStorage(raw_path)
 
     @staticmethod
     def _build_report(
