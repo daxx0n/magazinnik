@@ -1,0 +1,50 @@
+name: apply catalog presentation
+
+on:
+  push:
+    branches:
+      - agent/catalog-master-presentation
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/catalog-master-presentation
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Apply migration
+        run: python tools/apply_catalog_presentation.py
+
+      - name: Run tests
+        run: python -m unittest discover -s tests
+
+      - name: Commit generated changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/models/search_result.py \
+                  app/services/catalog_service.py \
+                  app/services/price_service.py \
+                  app/handlers/search.py \
+                  tests/test_price_service_catalog.py \
+                  tests/test_catalog_presentation.py \
+                  tests/test_catalog_lookup.py
+          git commit -m "Add feature-flagged master catalog presentation"
+          git push
