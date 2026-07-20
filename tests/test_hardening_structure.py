@@ -1,4 +1,6 @@
+import ast
 import unittest
+from collections import Counter
 from pathlib import Path
 
 
@@ -64,6 +66,50 @@ class HardeningStructureTest(unittest.TestCase):
             "    except SearchBusyError:",
             text,
         )
+
+    def test_search_handler_has_no_duplicate_top_level_functions(self) -> None:
+        path = ROOT / "app/handlers/search.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names = [
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        duplicates = {
+            name: count
+            for name, count in Counter(names).items()
+            if count > 1
+        }
+        self.assertEqual(duplicates, {})
+
+    def test_critical_service_classes_have_no_duplicate_methods(self) -> None:
+        checks = {
+            ROOT / "app/services/catalog_service.py": "CatalogService",
+            ROOT / "app/services/price_service.py": "PriceService",
+        }
+        for path, class_name in checks.items():
+            with self.subTest(path=path.name, class_name=class_name):
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                class_node = next(
+                    node
+                    for node in tree.body
+                    if isinstance(node, ast.ClassDef)
+                    and node.name == class_name
+                )
+                names = [
+                    node.name
+                    for node in class_node.body
+                    if isinstance(
+                        node,
+                        (ast.FunctionDef, ast.AsyncFunctionDef),
+                    )
+                ]
+                duplicates = {
+                    name: count
+                    for name, count in Counter(names).items()
+                    if count > 1
+                }
+                self.assertEqual(duplicates, {})
 
 
 if __name__ == "__main__":
