@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterable
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -17,12 +18,19 @@ class JsonCatalogStorage:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
 
-    def save(self, products: list[MasterCatalogProduct]) -> None:
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def save(self, products: Iterable[MasterCatalogProduct]) -> None:
         """Атомарно записывает полный снимок каталога."""
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = self._path.with_suffix(self._path.suffix + ".tmp")
-        payload = [self._serialize_product(product) for product in products]
+        payload = [
+            self._serialize_product(product)
+            for product in products
+        ]
         temporary_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -41,7 +49,9 @@ class JsonCatalogStorage:
         return [self._deserialize_product(item) for item in payload]
 
     @staticmethod
-    def _serialize_product(product: MasterCatalogProduct) -> dict[str, Any]:
+    def _serialize_product(
+        product: MasterCatalogProduct,
+    ) -> dict[str, Any]:
         payload = asdict(product)
         for offer in payload["offers"]:
             updated_at = offer.get("updated_at")
@@ -50,7 +60,9 @@ class JsonCatalogStorage:
         return payload
 
     @staticmethod
-    def _deserialize_product(payload: dict[str, Any]) -> MasterCatalogProduct:
+    def _deserialize_product(
+        payload: dict[str, Any],
+    ) -> MasterCatalogProduct:
         identity = ProductIdentity(**payload["identity"])
         offers = []
         for raw_offer in payload.get("offers", []):
