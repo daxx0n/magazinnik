@@ -109,6 +109,12 @@ class PriceService:
                 12,
             )
         )
+        self._source_search_semaphore = asyncio.Semaphore(
+            self._positive_environment_int(
+                "SOURCE_SEARCH_MAX_CONCURRENCY",
+                12,
+            )
+        )
 
     async def find_onliner_products(
         self,
@@ -602,6 +608,14 @@ class PriceService:
         return value if value > 0 else default
 
     @staticmethod
+    def _positive_environment_int(name: str, default: int) -> int:
+        try:
+            value = int(os.getenv(name, "").strip())
+        except ValueError:
+            return default
+        return value if value > 0 else default
+
+    @staticmethod
     async def _timed_result(
         awaitable: Awaitable[SearchItem],
     ) -> tuple[SearchItem | BaseException, float]:
@@ -860,6 +874,13 @@ class PriceService:
 
         result = await asyncio.shield(task)
         return list(result)
+
+    async def _run_limited_source_loader(
+        self,
+        loader: Callable[[], Awaitable[list[SearchItem]]],
+    ) -> list[SearchItem]:
+        async with self._source_search_semaphore:
+            return await loader()
 
     async def _run_limited_source_loader(
         self,

@@ -41,6 +41,15 @@ from app.services.search_sessions import (
     SearchSessionRegistry,
     SelectionQueryRegistry,
 )
+from app.services.search_input import SearchInputError, normalize_search_query
+from app.services.search_load import (
+    SearchBusyError,
+    SearchRequestCoordinator,
+)
+from app.services.search_sessions import (
+    SearchSessionRegistry,
+    SelectionQueryRegistry,
+)
 from app.services.product_variants import (
     ProductVariantGroup,
     display_color,
@@ -93,6 +102,22 @@ comparison_diagnostics: OrderedDict[
     ComparisonResult,
 ] = OrderedDict()
 price_history_repository: PriceHistoryRepository | None = None
+product_session_registry = SearchSessionRegistry(
+    capacity=MAX_SEARCH_SESSIONS,
+    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
+)
+category_session_registry = SearchSessionRegistry(
+    capacity=MAX_SEARCH_SESSIONS,
+    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
+)
+selection_query_registry = SelectionQueryRegistry(
+    capacity=10_000,
+    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
+)
+comparison_coordinator: SearchRequestCoordinator[
+    tuple[str, str],
+    ComparisonResult,
+] = SearchRequestCoordinator()
 product_session_registry = SearchSessionRegistry(
     capacity=MAX_SEARCH_SESSIONS,
     ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
@@ -295,6 +320,12 @@ async def handle_onliner_url(
     except InvalidProductUrlError as error:
         await status_message.edit_text(
             f"Некорректная ссылка.\n\n{error}"
+        )
+        return
+    except SearchBusyError:
+        await message.edit_text(
+            "Сейчас выполняется слишком много сравнений. "
+            "Попробуй ещё раз через несколько секунд."
         )
         return
     except SearchBusyError:
@@ -1459,6 +1490,19 @@ def store_product_search(
             product_key=product.key,
             query=query,
         )
+    product_session_registry.register(
+        search_id,
+        query=query,
+        owner_chat_id=owner_chat_id,
+        owner_user_id=owner_user_id,
+    )
+    for product in products:
+        selection_query_registry.remember(
+            chat_id=owner_chat_id,
+            user_id=owner_user_id,
+            product_key=product.key,
+            query=query,
+        )
 
     if parent is not None:
         product_search_parents[search_id] = parent
@@ -1468,6 +1512,7 @@ def store_product_search(
             last=False
         )
         product_search_parents.pop(expired_search_id, None)
+        product_session_registry.remove(expired_search_id)
         product_session_registry.remove(expired_search_id)
 
     return search_id
@@ -2008,6 +2053,72 @@ def authorized_product_search(
         ),
         user_id=callback_user_id(callback),
     )
+    products = authorized_product_search(callback, search_id)
+    if metadata is None or products is None:
+        if products is None:
+            product_session_registry.remove(search_id)
+        return None
+    product_searches.move_to_end(search_id)
+    return products
+
+
+def authorized_category_search(
+    callback: CallbackQuery,
+    search_id: str,
+) -> CategorySearchSession | None:
+    metadata = category_session_registry.authorize(
+        search_id,
+        chat_id=(
+            message_chat_id(callback.message)
+            if callback.message is not None
+            else None
+        ),
+        user_id=callback_user_id(callback),
+    )
+    session = authorized_category_search(callback, search_id)
+    if metadata is None or session is None:
+        if session is None:
+            category_session_registry.remove(search_id)
+        return None
+    category_searches.move_to_end(search_id)
+    return session
+
+
+
+def callback_user_id(callback: CallbackQuery) -> int | None:
+    user = getattr(callback, "from_user", None)
+    user_id = getattr(user, "id", None)
+    return user_id if isinstance(user_id, int) else None
+
+
+def message_user_id(message: Message) -> int | None:
+    user = getattr(message, "from_user", None)
+    user_id = getattr(user, "id", None)
+    return user_id if isinstance(user_id, int) else None
+
+
+def message_interaction_key(
+    message: Message,
+) -> tuple[int, int | None] | None:
+    chat_id = message_chat_id(message)
+    if chat_id is None:
+        return None
+    return chat_id, message_user_id(message)
+
+
+def authorized_product_search(
+    callback: CallbackQuery,
+    search_id: str,
+) -> list[ProductCandidate] | None:
+    metadata = product_session_registry.authorize(
+        search_id,
+        chat_id=(
+            message_chat_id(callback.message)
+            if callback.message is not None
+            else None
+        ),
+        user_id=callback_user_id(callback),
+    )
     products = product_searches.get(search_id)
     if metadata is None or products is None:
         if products is None:
@@ -2073,6 +2184,7 @@ def format_comparison_diagnostics(
         "brand": "производитель",
         "bundle": "комплектация",
         "color": "цвет",
+        "color_unknown": "цвет не указан",
         "color_unknown": "цвет не указан",
         "configuration": "комплектация устройства",
         "condition": "состояние товара",
