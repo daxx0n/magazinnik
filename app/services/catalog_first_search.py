@@ -14,6 +14,7 @@ from app.models.search_result import ComparisonResult, SourceSearchStatus
 from app.services.catalog_service import CatalogService
 from app.services.model_selection import (
     collapse_color_variants,
+    explicit_color_mismatch,
     generation_mismatch,
     requested_color_key,
 )
@@ -188,6 +189,12 @@ class CatalogFirstPriceService(PriceService):
             requested_title=requested_title,
         ):
             return "model_number"
+
+        if explicit_color_mismatch(
+            requested_title=requested_title,
+            candidate_title=candidate_title,
+        ):
+            return "color"
 
         reason = PriceService._model_mismatch_reason(
             canonical_title=canonical_title,
