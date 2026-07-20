@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import contextmanager
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -86,7 +87,7 @@ class SqliteCatalogStorage:
     @property
     def schema_version(self) -> int:
         self.initialize()
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT COALESCE(MAX(version), 0) AS version "
                 "FROM schema_migrations"
@@ -99,6 +100,8 @@ class SqliteCatalogStorage:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         connection = self._connect()
         try:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
@@ -141,6 +144,8 @@ class SqliteCatalogStorage:
         self.initialize()
         connection = self._connect()
         try:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
             connection.execute("BEGIN IMMEDIATE")
             connection.execute("DELETE FROM catalog_offers")
             connection.execute("DELETE FROM catalog_products")
@@ -228,7 +233,7 @@ class SqliteCatalogStorage:
         """Восстанавливает карточки и офферы в исходном порядке."""
 
         self.initialize()
-        with self._connect() as connection:
+        with self._connection() as connection:
             product_rows = connection.execute(
                 "SELECT * FROM catalog_products ORDER BY position"
             ).fetchall()
@@ -295,7 +300,7 @@ class SqliteCatalogStorage:
 
     def is_empty(self) -> bool:
         self.initialize()
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT COUNT(*) AS count FROM catalog_products"
             ).fetchone()
@@ -314,6 +319,18 @@ class SqliteCatalogStorage:
             return 0
         self.save(products)
         return len(products)
+
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path, timeout=5.0)

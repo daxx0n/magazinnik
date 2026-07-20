@@ -1,4 +1,6 @@
+import math
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,7 +35,9 @@ class PriceHistoryRepository:
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with self._connect() as connection:
+        with self._connection() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS price_observations (
@@ -74,12 +78,17 @@ class PriceHistoryRepository:
         offers: list[ProductOffer],
         observed_at: str | None = None,
     ) -> None:
-        if not offers:
+        valid_offers = [
+            offer
+            for offer in offers
+            if math.isfinite(float(offer.price)) and float(offer.price) >= 0
+        ]
+        if not valid_offers:
             return
 
         timestamp = observed_at or self._timestamp()
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.executemany(
                 """
                 INSERT INTO price_observations (
@@ -98,7 +107,7 @@ class PriceHistoryRepository:
                         offer.url,
                         timestamp,
                     )
-                    for offer in offers
+                    for offer in valid_offers
                 ],
             )
 
@@ -107,7 +116,8 @@ class PriceHistoryRepository:
         product_key: str,
         limit: int = 10,
     ) -> list[PricePoint]:
-        with self._connect() as connection:
+        safe_limit = min(max(int(limit), 1), 100)
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT
@@ -126,7 +136,7 @@ class PriceHistoryRepository:
                 ORDER BY observed_at DESC
                 LIMIT ?
                 """,
-                (product_key, limit),
+                (product_key, safe_limit),
             ).fetchall()
 
         return [
@@ -150,7 +160,12 @@ class PriceHistoryRepository:
     ) -> bool:
         """Включает подписку или отключает существующую."""
 
-        with self._connect() as connection:
+        price = float(current_price)
+        if not math.isfinite(price) or price < 0:
+            raise ValueError("Alert price must be a finite non-negative number")
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 """
                 SELECT active FROM price_alerts
@@ -188,7 +203,7 @@ class PriceHistoryRepository:
                     product_key,
                     title,
                     query,
-                    current_price,
+                    price,
                     currency,
                     self._timestamp(),
                 ),
@@ -196,7 +211,7 @@ class PriceHistoryRepository:
             return True
 
     def active_alerts(self) -> list[PriceAlert]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT chat_id, product_key, title, query,
@@ -214,7 +229,7 @@ class PriceHistoryRepository:
         alert: PriceAlert,
         notified_price: float | None = None,
     ) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             if notified_price is None:
                 connection.execute(
                     """
@@ -224,6 +239,11 @@ class PriceHistoryRepository:
                     (self._timestamp(), alert.chat_id, alert.product_key),
                 )
             else:
+                price = float(notified_price)
+                if not math.isfinite(price) or price < 0:
+                    raise ValueError(
+                        "Notified price must be a finite non-negative number"
+                    )
                 connection.execute(
                     """
                     UPDATE price_alerts
@@ -232,15 +252,31 @@ class PriceHistoryRepository:
                     """,
                     (
                         self._timestamp(),
-                        notified_price,
+                        price,
                         alert.chat_id,
                         alert.product_key,
                     ),
                 )
 
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(
+            self.database_path,
+            timeout=10.0,
+        )
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 10000")
         return connection
 
     @staticmethod

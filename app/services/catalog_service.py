@@ -1,5 +1,14 @@
+import asyncio
+import asyncio
+import asyncio
 import logging
 import os
+import threading
+from functools import wraps
+import threading
+from functools import wraps
+import threading
+from functools import wraps
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import replace
@@ -29,6 +38,39 @@ logger = logging.getLogger(__name__)
 CatalogStorage = JsonCatalogStorage | SqliteCatalogStorage
 
 
+def synchronized(method):
+    """Сериализует доступ к общему in-memory каталогу из event loop и threads."""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def synchronized(method):
+    """Сериализует доступ к общему in-memory каталогу из event loop и threads."""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def synchronized(method):
+    """Сериализует доступ к общему in-memory каталогу из event loop и threads."""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class CatalogService:
     """Координирует адаптацию, дедупликацию и сохранение офферов."""
 
@@ -52,6 +94,7 @@ class CatalogService:
             updated_offers=0,
         )
         self._metrics = CatalogMetrics()
+        self._lock = threading.RLock()
 
         if self._storage is not None and restore_on_start:
             self._restore_fail_open()
@@ -86,6 +129,7 @@ class CatalogService:
             return "json"
         return "memory"
 
+    @synchronized
     def ingest_offer(self, offer: ProductOffer) -> MasterCatalogProduct:
         result = self._ingest(offer)
         self._last_report = self._build_report((result,))
@@ -93,6 +137,7 @@ class CatalogService:
         self._persist()
         return result.product
 
+    @synchronized
     def ingest_offers(
         self,
         offers: Iterable[ProductOffer],
@@ -103,6 +148,7 @@ class CatalogService:
         self._persist()
         return tuple(result.product for result in results)
 
+    @synchronized
     def ingest_offers_with_report(
         self,
         offers: Iterable[ProductOffer],
@@ -110,6 +156,19 @@ class CatalogService:
         self.ingest_offers(offers)
         return self._last_report
 
+    async def ingest_offers_with_report_async(
+        self,
+        offers: Iterable[ProductOffer],
+    ) -> CatalogIngestReport:
+        """Сохраняет каталог вне event loop, сериализуя конкурентные записи."""
+
+        offer_tuple = tuple(offers)
+        return await asyncio.to_thread(
+            self.ingest_offers_with_report,
+            offer_tuple,
+        )
+
+    @synchronized
     def ingest_external_items_with_report(
         self,
         items: Iterable[ExternalCatalogItem],
@@ -172,11 +231,13 @@ class CatalogService:
         self._record_report(report)
         return report
 
+    @synchronized
     def search(self, query: str) -> list[MasterCatalogProduct]:
         """Ищет по названиям, нормализованной модели, MPN и EAN."""
 
         return search_catalog(self._catalog.products, query)
 
+    @synchronized
     def get_product(
         self,
         product_key: str,
@@ -202,6 +263,7 @@ class CatalogService:
         )
         return product
 
+    @synchronized
     def snapshot_metrics(
         self,
         now: datetime | None = None,
@@ -214,11 +276,13 @@ class CatalogService:
             stale_after=stale_after,
         )
 
+    @synchronized
     def pending_reviews(self, limit: int = 20) -> tuple[MatchReview, ...]:
         """Возвращает спорные пары, сохранённые вместе с офферами."""
 
         return self._catalog.pending_reviews(limit=limit)
 
+    @synchronized
     def accept_review(
         self,
         product_key: str,
@@ -233,6 +297,7 @@ class CatalogService:
         self._persist()
         return product
 
+    @synchronized
     def reject_review(
         self,
         product_key: str,
@@ -247,6 +312,7 @@ class CatalogService:
         self._persist()
         return product
 
+    @synchronized
     def save(self) -> None:
         """Принудительно сохраняет текущий снимок каталога."""
 

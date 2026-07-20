@@ -103,6 +103,12 @@ class PriceService:
             tuple[str, str, int],
             asyncio.Task[list[Any]],
         ] = {}
+        self._source_search_semaphore = asyncio.Semaphore(
+            self._positive_environment_int(
+                "SOURCE_SEARCH_MAX_CONCURRENCY",
+                12,
+            )
+        )
 
     async def find_onliner_products(
         self,
@@ -244,6 +250,7 @@ class PriceService:
     async def search_all_sources_by_onliner_key(
         self,
         product_key: str,
+        original_query: str | None = None,
     ) -> ComparisonResult:
         """Собирает общий топ цен для выбранной модели."""
 
@@ -274,7 +281,7 @@ class PriceService:
 
             canonical_title = onliner_offers[0].title
 
-        original_query = self._onliner_queries.get(
+        original_query = original_query or self._onliner_queries.get(
             product_key,
             canonical_title,
         )
@@ -488,7 +495,7 @@ class PriceService:
                 )
             )
 
-        catalog_report = self._ingest_catalog_offers(
+        catalog_report = await self._ingest_catalog_offers(
             combined_offers
         )
         master_product = self._master_product_for_report(
@@ -526,7 +533,7 @@ class PriceService:
             ),
         )
 
-    def _ingest_catalog_offers(
+    async def _ingest_catalog_offers(
         self,
         offers: Iterable[ProductOffer],
     ) -> CatalogIngestReport | None:
@@ -534,8 +541,8 @@ class PriceService:
 
         try:
             report = (
-                self._catalog_service
-                .ingest_offers_with_report(offers)
+                await self._catalog_service
+                .ingest_offers_with_report_async(offers)
             )
         except Exception:
             logger.exception(
@@ -585,6 +592,14 @@ class PriceService:
             "yes",
             "on",
         }
+
+    @staticmethod
+    def _positive_environment_int(name: str, default: int) -> int:
+        try:
+            value = int(os.getenv(name, "").strip())
+        except ValueError:
+            return default
+        return value if value > 0 else default
 
     @staticmethod
     async def _timed_result(
@@ -832,7 +847,9 @@ class PriceService:
         task = self._source_search_tasks.get(cache_key)
 
         if task is None:
-            task = asyncio.create_task(loader())
+            task = asyncio.create_task(
+                self._run_limited_source_loader(loader)
+            )
             self._source_search_tasks[cache_key] = task
             task.add_done_callback(
                 partial(
@@ -843,6 +860,13 @@ class PriceService:
 
         result = await asyncio.shield(task)
         return list(result)
+
+    async def _run_limited_source_loader(
+        self,
+        loader: Callable[[], Awaitable[list[SearchItem]]],
+    ) -> list[SearchItem]:
+        async with self._source_search_semaphore:
+            return await loader()
 
     def _complete_source_search(
         self,
@@ -1243,9 +1267,14 @@ class PriceService:
         }
 
         def is_accessory(value: str) -> bool:
+            normalized_value = re.sub(
+                r"\b(?:без|с)\s+дисковод\w*\b",
+                " ",
+                value.casefold().replace("ё", "е"),
+            )
             return any(
                 token.startswith(marker)
-                for token in value.split()
+                for token in normalized_value.split()
                 for marker in accessory_markers
             )
 

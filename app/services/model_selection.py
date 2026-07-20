@@ -286,6 +286,15 @@ def _color_suffix(title: str) -> str | None:
         return None
 
     tokens = title.split()
+    if not tokens:
+        return None
+
+    last_token = tokens[-1].strip("()[]{}.,;:-_/ ")
+    if not last_token or requested_color_key(last_token) is None:
+        # Цвет должен завершать название. Иначе слова после цвета могут быть
+        # состоянием товара, комплектом или иной значимой модификацией.
+        return None
+
     max_width = min(4, len(tokens) - 1)
     for width in range(1, max_width + 1):
         raw_suffix = " ".join(tokens[-width:])

@@ -184,12 +184,14 @@ class ModelSelectionTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_broad_query_still_rejects_pixel_6_after_pixel_8_selection(self) -> None:
         catalog_service = Mock()
-        catalog_service.ingest_offers_with_report.return_value = Mock(
-            total_offers=1,
-            created_products=1,
-            merged_offers=0,
-            updated_offers=0,
-            product_keys=("product-1",),
+        catalog_service.ingest_offers_with_report_async = AsyncMock(
+            return_value=Mock(
+                total_offers=1,
+                created_products=1,
+                merged_offers=0,
+                updated_offers=0,
+                product_keys=("product-1",),
+            )
         )
         service = CatalogFirstPriceService(
             catalog_service=catalog_service,
