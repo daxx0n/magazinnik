@@ -12,6 +12,12 @@ from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import ComparisonResult, SourceSearchStatus
 from app.services.catalog_service import CatalogService
+from app.services.model_selection import (
+    collapse_color_variants,
+    explicit_color_mismatch,
+    generation_mismatch,
+    requested_color_key,
+)
 from app.services.price_service import PriceService
 from app.sources import ProductNotFoundError
 
@@ -59,7 +65,8 @@ class CatalogFirstPriceService(PriceService):
         """Возвращает мастер-карточки, сохраняя Onliner fallback."""
 
         if not self._catalog_search_enabled or category is not None:
-            return await super().find_onliner_products(query, category)
+            products = await super().find_onliner_products(query, category)
+            return collapse_color_variants(products, query)
 
         try:
             products = self._catalog_service.search(query)
@@ -81,7 +88,8 @@ class CatalogFirstPriceService(PriceService):
                 )
                 return candidates
 
-        return await super().find_onliner_products(query, category)
+        products = await super().find_onliner_products(query, category)
+        return collapse_color_variants(products, query)
 
     async def search_all_sources_by_onliner_key(
         self,
@@ -119,7 +127,11 @@ class CatalogFirstPriceService(PriceService):
 
         try:
             candidates = await super().find_onliner_products(product.title)
-            live_candidate = self._select_live_candidate(product.title, candidates)
+            live_candidate = self._select_live_candidate(
+                product.title,
+                candidates,
+                requested_title=query,
+            )
             if live_candidate is not None:
                 self._onliner_queries[live_candidate.key] = query
                 logger.info(
@@ -162,6 +174,40 @@ class CatalogFirstPriceService(PriceService):
             "В мастер-каталоге нет доступных предложений, "
             "а live-поиск не нашёл товар."
         )
+
+    @staticmethod
+    def _model_mismatch_reason(
+        canonical_title: str,
+        candidate_title: str,
+        requested_title: str | None = None,
+    ) -> str | None:
+        """Усиливает проверку поколения и делает цвет query-aware."""
+
+        if generation_mismatch(
+            canonical_title=canonical_title,
+            candidate_title=candidate_title,
+            requested_title=requested_title,
+        ):
+            return "model_number"
+
+        if explicit_color_mismatch(
+            requested_title=requested_title,
+            candidate_title=candidate_title,
+        ):
+            return "color"
+
+        reason = PriceService._model_mismatch_reason(
+            canonical_title=canonical_title,
+            candidate_title=candidate_title,
+            requested_title=requested_title,
+        )
+        if (
+            reason == "color"
+            and requested_title is not None
+            and requested_color_key(requested_title) is None
+        ):
+            return None
+        return reason
 
     def _candidate_from_product(
         self,
@@ -260,6 +306,7 @@ class CatalogFirstPriceService(PriceService):
         self,
         canonical_title: str,
         candidates: list[ProductCandidate],
+        requested_title: str | None = None,
     ) -> ProductCandidate | None:
         return next(
             (
@@ -268,7 +315,9 @@ class CatalogFirstPriceService(PriceService):
                 if self._model_mismatch_reason(
                     canonical_title,
                     candidate.title,
-                    requested_title=canonical_title,
+                    requested_title=(
+                        requested_title or canonical_title
+                    ),
                 )
                 is None
             ),
