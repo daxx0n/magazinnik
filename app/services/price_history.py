@@ -164,6 +164,7 @@ class PriceHistoryRepository:
             raise ValueError("Alert price must be a finite non-negative number")
 
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 """
                 SELECT active FROM price_alerts

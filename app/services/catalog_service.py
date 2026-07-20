@@ -1,7 +1,10 @@
 import asyncio
 import asyncio
+import asyncio
 import logging
 import os
+import threading
+from functools import wraps
 import threading
 from functools import wraps
 import threading
@@ -33,6 +36,17 @@ logger = logging.getLogger(__name__)
 
 
 CatalogStorage = JsonCatalogStorage | SqliteCatalogStorage
+
+
+def synchronized(method):
+    """Сериализует доступ к общему in-memory каталогу из event loop и threads."""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 def synchronized(method):
@@ -141,6 +155,18 @@ class CatalogService:
     ) -> CatalogIngestReport:
         self.ingest_offers(offers)
         return self._last_report
+
+    async def ingest_offers_with_report_async(
+        self,
+        offers: Iterable[ProductOffer],
+    ) -> CatalogIngestReport:
+        """Сохраняет каталог вне event loop, сериализуя конкурентные записи."""
+
+        offer_tuple = tuple(offers)
+        return await asyncio.to_thread(
+            self.ingest_offers_with_report,
+            offer_tuple,
+        )
 
     @synchronized
     async def ingest_offers_with_report_async(

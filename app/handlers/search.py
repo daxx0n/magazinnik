@@ -3,7 +3,7 @@ import logging
 import os
 import secrets
 from collections import Counter, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from aiogram import Bot, F, Router
@@ -32,6 +32,15 @@ from app.services.model_selection import (
 )
 from app.services.price_service import PriceService
 from app.services.price_history import PriceHistoryRepository
+from app.services.search_input import SearchInputError, normalize_search_query
+from app.services.search_load import (
+    SearchBusyError,
+    SearchRequestCoordinator,
+)
+from app.services.search_sessions import (
+    SearchSessionRegistry,
+    SelectionQueryRegistry,
+)
 from app.services.search_input import SearchInputError, normalize_search_query
 from app.services.search_load import (
     SearchBusyError,
@@ -133,6 +142,30 @@ selection_query_registry = SelectionQueryRegistry(
 comparison_coordinator: SearchRequestCoordinator[
     tuple[str, str],
     ComparisonResult,
+] = SearchRequestCoordinator()
+product_session_registry = SearchSessionRegistry(
+    capacity=MAX_SEARCH_SESSIONS,
+    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
+)
+category_session_registry = SearchSessionRegistry(
+    capacity=MAX_SEARCH_SESSIONS,
+    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
+)
+selection_query_registry = SelectionQueryRegistry(
+    capacity=10_000,
+    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
+)
+comparison_coordinator: SearchRequestCoordinator[
+    tuple[str, str],
+    ComparisonResult,
+] = SearchRequestCoordinator()
+category_discovery_coordinator: SearchRequestCoordinator[
+    str,
+    list[ProductCategory],
+] = SearchRequestCoordinator()
+product_discovery_coordinator: SearchRequestCoordinator[
+    tuple[str, str],
+    list[ProductCandidate],
 ] = SearchRequestCoordinator()
 
 
@@ -549,6 +582,7 @@ async def handle_product_selection(
         message=callback.message,
         product_key=product_key,
         original_query=original_query,
+        user_id=user_id,
     )
 
 
@@ -556,6 +590,7 @@ async def load_product_comparison(
     message: Message,
     product_key: str,
     original_query: str | None = None,
+    user_id: int | None = None,
 ) -> None:
     """Загружает сравнение выбранной модификации."""
 
@@ -566,12 +601,23 @@ async def load_product_comparison(
 
     try:
         comparison = await comparison_coordinator.run(
-            (product_key, original_query or ""),
+            (product_key, ""),
             lambda: price_service.search_all_sources_by_onliner_key(
                 product_key,
-                original_query=original_query,
+                original_query=None,
             ),
         )
+        if original_query:
+            comparison = replace(
+                comparison,
+                query=original_query,
+            )
+    except SearchBusyError:
+        await message.edit_text(
+            "Сейчас выполняется слишком много сравнений. "
+            "Попробуй ещё раз через несколько секунд."
+        )
+        return
     except ProductNotFoundError as error:
         await message.edit_text(
             f"Предложения не найдены.\n\n{error}"
@@ -604,7 +650,7 @@ async def load_product_comparison(
     if chat_id is not None:
         store_comparison_diagnostics(
             chat_id=chat_id,
-            user_id=message_user_id(message),
+            user_id=user_id,
             comparison=comparison,
         )
 
@@ -778,10 +824,19 @@ async def handle_category_selection(
     )
 
     try:
-        products = await price_service.find_onliner_products(
-            query=session.query,
-            category=category.key,
+        products = await product_discovery_coordinator.run(
+            (session.query.casefold(), category.key),
+            lambda: price_service.find_onliner_products(
+                query=session.query,
+                category=category.key,
+            ),
         )
+    except SearchBusyError:
+        await callback.message.edit_text(
+            "Сейчас выполняется слишком много поисков. "
+            "Попробуй ещё раз через несколько секунд."
+        )
+        return
     except SourceUnavailableError as error:
         logger.warning(
             "Onliner category search unavailable: %s",
@@ -869,6 +924,12 @@ async def handle_variant_group(
     except (ValueError, IndexError):
         return
 
+    user_id = callback_user_id(callback)
+    original_query = selection_query_registry.get(
+        chat_id=message_chat_id(callback.message),
+        user_id=user_id,
+        product_key=group.products[0].key,
+    )
     await show_color_selection(
         message=callback.message,
         group=group,
@@ -877,6 +938,8 @@ async def handle_variant_group(
             f"olp:{search_id}:"
             f"{group_index // PRODUCT_PAGE_SIZE}"
         ),
+        original_query=original_query,
+        user_id=user_id,
     )
 
 
@@ -920,6 +983,12 @@ async def handle_memory_selection(
     except (ValueError, IndexError):
         return
 
+    user_id = callback_user_id(callback)
+    original_query = selection_query_registry.get(
+        chat_id=message_chat_id(callback.message),
+        user_id=user_id,
+        product_key=memory_products[0].key,
+    )
     await show_color_selection(
         message=callback.message,
         group=group,
@@ -927,6 +996,8 @@ async def handle_memory_selection(
         back_callback=(
             f"olg:{search_id}:{group_index}"
         ),
+        original_query=original_query,
+        user_id=user_id,
     )
 
 @router.message(Command("five_search"))
@@ -950,7 +1021,11 @@ async def handle_five_element_search(
         )
         return
 
-    query = command_parts[1].strip()
+    try:
+        query = normalize_search_query(command_parts[1])
+    except SearchInputError as error:
+        await message.answer(str(error))
+        return
 
     status_message = await message.answer(
         "🔎 Ищу товары в 5 элементе..."
@@ -1179,7 +1254,10 @@ async def handle_search(
 
         if price_service.should_categorize_query(query):
             categories = (
-                await price_service.find_onliner_categories(query)
+                await category_discovery_coordinator.run(
+                    query.casefold(),
+                    lambda: price_service.find_onliner_categories(query),
+                )
             )
 
         if len(categories) > 1:
@@ -1203,17 +1281,24 @@ async def handle_search(
             )
             return
 
-        products = (
-            await price_service
-            .find_onliner_products(
-                query,
-                category=(
-                    categories[0].key
-                    if len(categories) == 1
-                    else None
-                ),
-            )
+        selected_category = (
+            categories[0].key
+            if len(categories) == 1
+            else None
         )
+        products = await product_discovery_coordinator.run(
+            (query.casefold(), selected_category or ""),
+            lambda: price_service.find_onliner_products(
+                query,
+                category=selected_category,
+            ),
+        )
+    except SearchBusyError:
+        await status_message.edit_text(
+            "Сейчас выполняется слишком много поисков. "
+            "Попробуй ещё раз через несколько секунд."
+        )
+        return
     except SourceUnavailableError as error:
         logger.warning(
             "Onliner search unavailable: %s",
@@ -1396,6 +1481,8 @@ async def show_color_selection(
     group: ProductVariantGroup,
     products: list[ProductCandidate],
     back_callback: str,
+    original_query: str | None = None,
+    user_id: int | None = None,
 ) -> None:
     """Показывает цвет; память уточняется в подписи варианта."""
 
@@ -1418,6 +1505,8 @@ async def show_color_selection(
             await load_product_comparison(
                 message=message,
                 product_key=only_product.key,
+                original_query=original_query,
+                user_id=user_id,
             )
             return
 
@@ -1503,6 +1592,19 @@ def store_product_search(
             product_key=product.key,
             query=query,
         )
+    product_session_registry.register(
+        search_id,
+        query=query,
+        owner_chat_id=owner_chat_id,
+        owner_user_id=owner_user_id,
+    )
+    for product in products:
+        selection_query_registry.remember(
+            chat_id=owner_chat_id,
+            user_id=owner_user_id,
+            product_key=product.key,
+            query=query,
+        )
 
     if parent is not None:
         product_search_parents[search_id] = parent
@@ -1512,6 +1614,7 @@ def store_product_search(
             last=False
         )
         product_search_parents.pop(expired_search_id, None)
+        product_session_registry.remove(expired_search_id)
         product_session_registry.remove(expired_search_id)
         product_session_registry.remove(expired_search_id)
 
@@ -2055,6 +2158,73 @@ def authorized_product_search(
     )
     products = authorized_product_search(callback, search_id)
     if metadata is None or products is None:
+        product_searches.pop(search_id, None)
+        product_search_parents.pop(search_id, None)
+        product_session_registry.remove(search_id)
+        return None
+    product_searches.move_to_end(search_id)
+    return products
+
+
+def authorized_category_search(
+    callback: CallbackQuery,
+    search_id: str,
+) -> CategorySearchSession | None:
+    metadata = category_session_registry.authorize(
+        search_id,
+        chat_id=(
+            message_chat_id(callback.message)
+            if callback.message is not None
+            else None
+        ),
+        user_id=callback_user_id(callback),
+    )
+    session = authorized_category_search(callback, search_id)
+    if metadata is None or session is None:
+        category_searches.pop(search_id, None)
+        category_session_registry.remove(search_id)
+        return None
+    category_searches.move_to_end(search_id)
+    return session
+
+
+
+def callback_user_id(callback: CallbackQuery) -> int | None:
+    user = getattr(callback, "from_user", None)
+    user_id = getattr(user, "id", None)
+    return user_id if isinstance(user_id, int) else None
+
+
+def message_user_id(message: Message) -> int | None:
+    user = getattr(message, "from_user", None)
+    user_id = getattr(user, "id", None)
+    return user_id if isinstance(user_id, int) else None
+
+
+def message_interaction_key(
+    message: Message,
+) -> tuple[int, int | None] | None:
+    chat_id = message_chat_id(message)
+    if chat_id is None:
+        return None
+    return chat_id, message_user_id(message)
+
+
+def authorized_product_search(
+    callback: CallbackQuery,
+    search_id: str,
+) -> list[ProductCandidate] | None:
+    metadata = product_session_registry.authorize(
+        search_id,
+        chat_id=(
+            message_chat_id(callback.message)
+            if callback.message is not None
+            else None
+        ),
+        user_id=callback_user_id(callback),
+    )
+    products = authorized_product_search(callback, search_id)
+    if metadata is None or products is None:
         if products is None:
             product_session_registry.remove(search_id)
         return None
@@ -2184,6 +2354,7 @@ def format_comparison_diagnostics(
         "brand": "производитель",
         "bundle": "комплектация",
         "color": "цвет",
+        "color_unknown": "цвет не указан",
         "color_unknown": "цвет не указан",
         "color_unknown": "цвет не указан",
         "configuration": "комплектация устройства",
