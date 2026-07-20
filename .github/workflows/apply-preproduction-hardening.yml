@@ -20,6 +20,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Correct migration target
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tools/apply_preproduction_hardening.py")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              '        "        query = self._catalog_queries.get(product_key, product.title)\\n",\n        "        query = original_query or self._catalog_queries.get(\\n            product_key,\\n            product.title,\\n        )\\n",',
+              '        "        original_query = self._catalog_queries.get(product_key, product.title)\\n",\n        "        original_query = original_query or self._catalog_queries.get(\\n            product_key,\\n            product.title,\\n        )\\n",',
+          )
+          text = text.replace(
+              '                    original_query=query,',
+              '                    original_query=original_query,',
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
       - name: Apply hardening
         run: python tools/apply_preproduction_hardening.py
       - name: Validate syntax
