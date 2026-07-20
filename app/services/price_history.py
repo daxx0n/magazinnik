@@ -1,3 +1,4 @@
+import math
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -34,6 +35,8 @@ class PriceHistoryRepository:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
         with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS price_observations (
@@ -74,7 +77,12 @@ class PriceHistoryRepository:
         offers: list[ProductOffer],
         observed_at: str | None = None,
     ) -> None:
-        if not offers:
+        valid_offers = [
+            offer
+            for offer in offers
+            if math.isfinite(float(offer.price)) and float(offer.price) >= 0
+        ]
+        if not valid_offers:
             return
 
         timestamp = observed_at or self._timestamp()
@@ -98,7 +106,7 @@ class PriceHistoryRepository:
                         offer.url,
                         timestamp,
                     )
-                    for offer in offers
+                    for offer in valid_offers
                 ],
             )
 
@@ -107,6 +115,7 @@ class PriceHistoryRepository:
         product_key: str,
         limit: int = 10,
     ) -> list[PricePoint]:
+        safe_limit = min(max(int(limit), 1), 100)
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -126,7 +135,7 @@ class PriceHistoryRepository:
                 ORDER BY observed_at DESC
                 LIMIT ?
                 """,
-                (product_key, limit),
+                (product_key, safe_limit),
             ).fetchall()
 
         return [
@@ -149,6 +158,10 @@ class PriceHistoryRepository:
         currency: str,
     ) -> bool:
         """Включает подписку или отключает существующую."""
+
+        price = float(current_price)
+        if not math.isfinite(price) or price < 0:
+            raise ValueError("Alert price must be a finite non-negative number")
 
         with self._connect() as connection:
             existing = connection.execute(
@@ -188,7 +201,7 @@ class PriceHistoryRepository:
                     product_key,
                     title,
                     query,
-                    current_price,
+                    price,
                     currency,
                     self._timestamp(),
                 ),
@@ -224,6 +237,11 @@ class PriceHistoryRepository:
                     (self._timestamp(), alert.chat_id, alert.product_key),
                 )
             else:
+                price = float(notified_price)
+                if not math.isfinite(price) or price < 0:
+                    raise ValueError(
+                        "Notified price must be a finite non-negative number"
+                    )
                 connection.execute(
                     """
                     UPDATE price_alerts
@@ -232,15 +250,19 @@ class PriceHistoryRepository:
                     """,
                     (
                         self._timestamp(),
-                        notified_price,
+                        price,
                         alert.chat_id,
                         alert.product_key,
                     ),
                 )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(
+            self.database_path,
+            timeout=10.0,
+        )
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 10000")
         return connection
 
     @staticmethod
