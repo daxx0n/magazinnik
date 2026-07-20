@@ -5,7 +5,8 @@ import logging
 from aiogram import Bot, Dispatcher
 
 from app.config import load_config
-from app.handlers import catalog, common, search
+from app.handlers import catalog, catalog_feed, common, search
+from app.services.catalog_feed_upload import CatalogFeedUploadManager
 from app.services.catalog_first_search import CatalogFirstPriceService
 from app.services.catalog_refresh import CatalogRefreshService
 
@@ -15,6 +16,9 @@ search.price_service = CatalogFirstPriceService(
 )
 catalog_refresh_service = CatalogRefreshService(search.price_service)
 catalog.initialize_catalog_refresh(catalog_refresh_service)
+catalog_feed.initialize_catalog_feed_upload(
+    CatalogFeedUploadManager(search.price_service._catalog_service)
+)
 
 
 async def main() -> None:
@@ -37,6 +41,7 @@ async def main() -> None:
 
     dispatcher.include_router(common.router)
     dispatcher.include_router(catalog.router)
+    dispatcher.include_router(catalog_feed.router)
     dispatcher.include_router(search.router)
     search.initialize_price_history(config.price_database_path)
 
