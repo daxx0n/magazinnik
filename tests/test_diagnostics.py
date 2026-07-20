@@ -133,6 +133,33 @@ class DiagnosticsTest(unittest.IsolatedAsyncioTestCase):
             own_message.answer.await_args.args[0],
         )
 
+    async def test_diagnostics_are_isolated_inside_group_chat(self) -> None:
+        first = comparison_result()
+        second = comparison_result()
+        store_comparison_diagnostics(500, first, user_id=1)
+        store_comparison_diagnostics(500, second, user_id=2)
+
+        first_message = AsyncMock()
+        first_message.chat.id = 500
+        first_message.from_user.id = 1
+        second_message = AsyncMock()
+        second_message.chat.id = 500
+        second_message.from_user.id = 2
+
+        await handle_diagnostics(first_message)
+        await handle_diagnostics(second_message)
+
+        self.assertIn(
+            "Диагностика последнего сравнения",
+            first_message.answer.await_args.args[0],
+        )
+        self.assertIn(
+            "Диагностика последнего сравнения",
+            second_message.answer.await_args.args[0],
+        )
+        self.assertIs(comparison_diagnostics[(500, 1)], first)
+        self.assertIs(comparison_diagnostics[(500, 2)], second)
+
     @patch("app.handlers.search.price_service")
     async def test_comparison_stores_diagnostics_before_render(
         self,
@@ -147,9 +174,13 @@ class DiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         message.edit_text.side_effect = [None, RuntimeError("Telegram")]
 
         with self.assertRaises(RuntimeError):
-            await load_product_comparison(message, "iphone17")
+            await load_product_comparison(
+                message,
+                "iphone17",
+                user_id=42,
+            )
 
-        self.assertIs(comparison_diagnostics[300], result)
+        self.assertIs(comparison_diagnostics[(300, 42)], result)
 
 
 if __name__ == "__main__":
