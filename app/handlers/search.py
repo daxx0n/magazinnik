@@ -127,38 +127,6 @@ comparison_coordinator: SearchRequestCoordinator[
     tuple[str, str],
     ComparisonResult,
 ] = SearchRequestCoordinator()
-product_session_registry = SearchSessionRegistry(
-    capacity=MAX_SEARCH_SESSIONS,
-    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
-)
-category_session_registry = SearchSessionRegistry(
-    capacity=MAX_SEARCH_SESSIONS,
-    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
-)
-selection_query_registry = SelectionQueryRegistry(
-    capacity=10_000,
-    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
-)
-comparison_coordinator: SearchRequestCoordinator[
-    tuple[str, str],
-    ComparisonResult,
-] = SearchRequestCoordinator()
-product_session_registry = SearchSessionRegistry(
-    capacity=MAX_SEARCH_SESSIONS,
-    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
-)
-category_session_registry = SearchSessionRegistry(
-    capacity=MAX_SEARCH_SESSIONS,
-    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
-)
-selection_query_registry = SelectionQueryRegistry(
-    capacity=10_000,
-    ttl_seconds=SEARCH_SESSION_TTL_SECONDS,
-)
-comparison_coordinator: SearchRequestCoordinator[
-    tuple[str, str],
-    ComparisonResult,
-] = SearchRequestCoordinator()
 category_discovery_coordinator: SearchRequestCoordinator[
     str,
     list[ProductCategory],
@@ -167,22 +135,7 @@ product_discovery_coordinator: SearchRequestCoordinator[
     tuple[str, str],
     list[ProductCandidate],
 ] = SearchRequestCoordinator()
-category_discovery_coordinator: SearchRequestCoordinator[
-    str,
-    list[ProductCategory],
-] = SearchRequestCoordinator()
-product_discovery_coordinator: SearchRequestCoordinator[
-    tuple[str, str],
-    list[ProductCandidate],
-] = SearchRequestCoordinator()
-category_discovery_coordinator: SearchRequestCoordinator[
-    str,
-    list[ProductCategory],
-] = SearchRequestCoordinator()
-product_discovery_coordinator: SearchRequestCoordinator[
-    tuple[str, str],
-    list[ProductCandidate],
-] = SearchRequestCoordinator()
+
 
 
 def initialize_price_history(database_path: str | None = None) -> None:
@@ -622,18 +575,6 @@ async def load_product_comparison(
             "Попробуй ещё раз через несколько секунд."
         )
         return
-    except SearchBusyError:
-        await message.edit_text(
-            "Сейчас выполняется слишком много сравнений. "
-            "Попробуй ещё раз через несколько секунд."
-        )
-        return
-    except SearchBusyError:
-        await message.edit_text(
-            "Сейчас выполняется слишком много сравнений. "
-            "Попробуй ещё раз через несколько секунд."
-        )
-        return
     except ProductNotFoundError as error:
         await message.edit_text(
             f"Предложения не найдены.\n\n{error}"
@@ -847,18 +788,6 @@ async def handle_category_selection(
                 category=category.key,
             ),
         )
-    except SearchBusyError:
-        await callback.message.edit_text(
-            "Сейчас выполняется слишком много поисков. "
-            "Попробуй ещё раз через несколько секунд."
-        )
-        return
-    except SearchBusyError:
-        await callback.message.edit_text(
-            "Сейчас выполняется слишком много поисков. "
-            "Попробуй ещё раз через несколько секунд."
-        )
-        return
     except SearchBusyError:
         await callback.message.edit_text(
             "Сейчас выполняется слишком много поисков. "
@@ -1321,18 +1250,6 @@ async def handle_search(
                 category=selected_category,
             ),
         )
-    except SearchBusyError:
-        await status_message.edit_text(
-            "Сейчас выполняется слишком много поисков. "
-            "Попробуй ещё раз через несколько секунд."
-        )
-        return
-    except SearchBusyError:
-        await status_message.edit_text(
-            "Сейчас выполняется слишком много поисков. "
-            "Попробуй ещё раз через несколько секунд."
-        )
-        return
     except SearchBusyError:
         await status_message.edit_text(
             "Сейчас выполняется слишком много поисков. "
