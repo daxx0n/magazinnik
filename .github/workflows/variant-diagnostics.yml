@@ -1,9 +1,7 @@
 name: variant-diagnostics
 
 on:
-  push:
-    branches:
-      - agent/exact-model-color-funnel
+  pull_request:
 
 permissions:
   contents: read
