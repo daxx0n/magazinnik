@@ -1,11 +1,11 @@
 import re
 
 from app.models.catalog import ProductIdentity
-from app.services.product_variants import (
-    base_product_title,
-    extract_color_key,
-    extract_memory,
+from app.services.model_selection import (
+    model_variant_title,
+    requested_color_key,
 )
+from app.services.product_variants import extract_memory
 
 
 class ProductIdentityBuilder:
@@ -60,7 +60,7 @@ class ProductIdentityBuilder:
             brand=detected_brand,
             model=detected_model,
             memory=extract_memory(title),
-            color=extract_color_key(title),
+            color=requested_color_key(title),
             revision=detected_revision,
             ean=self._normalize_identifier(ean),
             mpn=self._normalize_identifier(mpn),
@@ -68,7 +68,7 @@ class ProductIdentityBuilder:
 
     @classmethod
     def _clean_title(cls, title: str) -> str:
-        value = base_product_title(title)
+        value = model_variant_title(title)
         for pattern in cls._revision_patterns:
             value = pattern.sub(" ", value)
         value = value.replace("ё", "е")

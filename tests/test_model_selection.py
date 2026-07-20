@@ -6,6 +6,9 @@ from app.models.product import ProductCandidate
 from app.services.catalog_first_search import CatalogFirstPriceService
 from app.services.model_selection import (
     collapse_color_variants,
+    group_model_variants,
+    model_variant_title,
+    selected_color_label,
     significant_model_numbers,
 )
 
@@ -40,21 +43,58 @@ class ModelSelectionTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(reason, "model_number")
 
-    def test_different_color_is_allowed_when_query_has_no_color(self) -> None:
+    def test_selected_variant_rejects_different_color(self) -> None:
         reason = CatalogFirstPriceService._model_mismatch_reason(
             canonical_title="Google Pixel 8 8GB/128GB (мятный зеленый)",
             candidate_title="Google Pixel 8 8GB/128GB (белый)",
-            requested_title="Google Pixel 8",
-        )
-        self.assertIsNone(reason)
-
-    def test_explicit_color_keeps_strict_color_filter(self) -> None:
-        reason = CatalogFirstPriceService._model_mismatch_reason(
-            canonical_title="Google Pixel 8 8GB/128GB (мятный зеленый)",
-            candidate_title="Google Pixel 8 8GB/128GB (снег)",
-            requested_title="Google Pixel 8 мятный зеленый",
+            requested_title="Google Pixel 8 8GB/128GB (мятный зеленый)",
         )
         self.assertEqual(reason, "color")
+
+    def test_selected_variant_rejects_unknown_color(self) -> None:
+        reason = CatalogFirstPriceService._model_mismatch_reason(
+            canonical_title="Google Pixel 8 8GB/128GB (Obsidian)",
+            candidate_title="Google Pixel 8 8GB/128GB",
+            requested_title="Google Pixel 8 8GB/128GB (Obsidian)",
+        )
+        self.assertEqual(reason, "color_unknown")
+
+    def test_russian_obsidian_is_grouped_inside_pixel_8_model(self) -> None:
+        products = [
+            ProductCandidate(
+                key="pixel8-default",
+                title="Google Pixel 8 8GB/128GB",
+                url="https://example.com/pixel8-default",
+            ),
+            ProductCandidate(
+                key="pixel8-obsidian",
+                title="Google Pixel 8 8GB/128GB (обсидиан)",
+                url="https://example.com/pixel8-obsidian",
+            ),
+            ProductCandidate(
+                key="pixel7",
+                title="Google Pixel 7 8GB/128GB (снег)",
+                url="https://example.com/pixel7",
+            ),
+        ]
+
+        groups = group_model_variants(products)
+
+        self.assertEqual(
+            [group.title for group in groups],
+            ["Google Pixel 8", "Google Pixel 7"],
+        )
+        self.assertEqual(len(groups[0].products), 2)
+        self.assertEqual(
+            model_variant_title("Google Pixel 8 8GB/128GB (обсидиан)"),
+            "Google Pixel 8",
+        )
+        self.assertEqual(
+            selected_color_label(
+                "Google Pixel 8 8GB/128GB (обсидиан)"
+            ),
+            "Обсидиан",
+        )
 
     def test_color_collapse_preserves_memory_and_pro_variants(self) -> None:
         products = [
@@ -110,7 +150,7 @@ class ModelSelectionTest(unittest.IsolatedAsyncioTestCase):
             products,
         )
 
-    async def test_live_search_collapses_color_candidates(self) -> None:
+    async def test_live_search_preserves_color_candidates_for_ui(self) -> None:
         service = CatalogFirstPriceService(
             catalog_service=Mock(),
             catalog_search_enabled=False,
@@ -139,10 +179,10 @@ class ModelSelectionTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [product.key for product in products],
-            ["mint", "pixel7"],
+            ["mint", "snow", "pixel7"],
         )
 
-    async def test_aggregate_search_rejects_pixel_7_offer(self) -> None:
+    async def test_broad_query_still_rejects_pixel_6_after_pixel_8_selection(self) -> None:
         catalog_service = Mock()
         catalog_service.ingest_offers_with_report.return_value = Mock(
             total_offers=1,
@@ -156,7 +196,7 @@ class ModelSelectionTest(unittest.IsolatedAsyncioTestCase):
             catalog_search_enabled=False,
             catalog_presentation_enabled=False,
         )
-        service._onliner_queries["pixel8"] = "Google Pixel 8"
+        service._onliner_queries["pixel8"] = "Pixel"
         service.search_onliner_key = AsyncMock(
             return_value=[
                 offer(
@@ -174,8 +214,8 @@ class ModelSelectionTest(unittest.IsolatedAsyncioTestCase):
             return_value=[
                 offer(
                     "Shop.by",
-                    "Телефон Google Pixel 7 8GB/128GB (снег)",
-                    994.0,
+                    "Телефон Google Pixel 6 8GB/128GB (Black)",
+                    900.0,
                 )
             ]
         )

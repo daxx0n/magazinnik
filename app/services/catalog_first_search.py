@@ -13,7 +13,7 @@ from app.models.product import ProductCandidate
 from app.models.search_result import ComparisonResult, SourceSearchStatus
 from app.services.catalog_service import CatalogService
 from app.services.model_selection import (
-    collapse_color_variants,
+    color_neutral_title,
     explicit_color_mismatch,
     generation_mismatch,
     requested_color_key,
@@ -62,11 +62,10 @@ class CatalogFirstPriceService(PriceService):
         query: str,
         category: str | None = None,
     ) -> list[ProductCandidate]:
-        """Возвращает мастер-карточки, сохраняя Onliner fallback."""
+        """Возвращает все варианты для последующего выбора модели и цвета."""
 
         if not self._catalog_search_enabled or category is not None:
-            products = await super().find_onliner_products(query, category)
-            return collapse_color_variants(products, query)
+            return await super().find_onliner_products(query, category)
 
         try:
             products = self._catalog_service.search(query)
@@ -88,8 +87,7 @@ class CatalogFirstPriceService(PriceService):
                 )
                 return candidates
 
-        products = await super().find_onliner_products(query, category)
-        return collapse_color_variants(products, query)
+        return await super().find_onliner_products(query, category)
 
     async def search_all_sources_by_onliner_key(
         self,
@@ -109,7 +107,7 @@ class CatalogFirstPriceService(PriceService):
         if product is None:
             raise ProductNotFoundError("Мастер-карточка больше не существует.")
 
-        query = self._catalog_queries.get(product_key, product.title)
+        original_query = self._catalog_queries.get(product_key, product.title)
         fresh_offers = self._catalog_offers(product, fresh_only=True)
         if fresh_offers:
             logger.info(
@@ -120,7 +118,7 @@ class CatalogFirstPriceService(PriceService):
             return self._catalog_comparison(
                 product=product,
                 product_key=product_key,
-                query=query,
+                query=original_query,
                 offers=fresh_offers,
                 started=started,
             )
@@ -130,10 +128,10 @@ class CatalogFirstPriceService(PriceService):
             live_candidate = self._select_live_candidate(
                 product.title,
                 candidates,
-                requested_title=query,
+                requested_title=product.title,
             )
             if live_candidate is not None:
-                self._onliner_queries[live_candidate.key] = query
+                self._onliner_queries[live_candidate.key] = product.title
                 logger.info(
                     "Master catalog stale; refreshing live: product=%s onliner=%s",
                     product.key,
@@ -145,7 +143,7 @@ class CatalogFirstPriceService(PriceService):
                 return replace(
                     result,
                     product_key=product_key,
-                    query=query,
+                    query=original_query,
                     master_product_key=(
                         result.master_product_key or product.key
                     ),
@@ -165,7 +163,7 @@ class CatalogFirstPriceService(PriceService):
             return self._catalog_comparison(
                 product=product,
                 product_key=product_key,
-                query=query,
+                query=original_query,
                 offers=stored_offers,
                 started=started,
             )
@@ -181,33 +179,38 @@ class CatalogFirstPriceService(PriceService):
         candidate_title: str,
         requested_title: str | None = None,
     ) -> str | None:
-        """Усиливает проверку поколения и делает цвет query-aware."""
+        """Строго проверяет выбранные поколение, память и цвет."""
 
+        reference_title = requested_title or canonical_title
         if generation_mismatch(
             canonical_title=canonical_title,
             candidate_title=candidate_title,
-            requested_title=requested_title,
+            requested_title=reference_title,
         ):
             return "model_number"
 
+        reference_color = requested_color_key(reference_title)
+        candidate_color = requested_color_key(candidate_title)
+        reason = PriceService._model_mismatch_reason(
+            canonical_title=color_neutral_title(canonical_title),
+            candidate_title=color_neutral_title(candidate_title),
+            requested_title=color_neutral_title(reference_title),
+        )
+        if reason is not None:
+            return reason
+
         if explicit_color_mismatch(
-            requested_title=requested_title,
+            requested_title=reference_title,
             candidate_title=candidate_title,
         ):
-            return "color"
+            return "color_unknown" if candidate_color is None else "color"
 
-        reason = PriceService._model_mismatch_reason(
-            canonical_title=canonical_title,
-            candidate_title=candidate_title,
-            requested_title=requested_title,
-        )
         if (
-            reason == "color"
-            and requested_title is not None
-            and requested_color_key(requested_title) is None
+            reference_color is not None
+            and candidate_color == reference_color
         ):
             return None
-        return reason
+        return None
 
     def _candidate_from_product(
         self,
