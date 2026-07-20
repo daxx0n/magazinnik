@@ -2188,8 +2188,6 @@ def format_comparison_diagnostics(
         "bundle": "комплектация",
         "color": "цвет",
         "color_unknown": "цвет не указан",
-        "color_unknown": "цвет не указан",
-        "color_unknown": "цвет не указан",
         "configuration": "комплектация устройства",
         "condition": "состояние товара",
         "memory": "память",
