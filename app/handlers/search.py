@@ -25,14 +25,19 @@ from app.models.search_result import (
     ComparisonResult,
     SourceSearchStatus,
 )
+from app.services.model_selection import (
+    group_model_variants,
+    requested_color_key,
+    selected_color_label,
+)
 from app.services.price_service import PriceService
 from app.services.price_history import PriceHistoryRepository
 from app.services.product_variants import (
     ProductVariantGroup,
     display_color,
     display_product_title,
+    extract_memory,
     group_by_memory,
-    group_product_variants,
 )
 from app.sources import (
     InvalidProductUrlError,
@@ -588,7 +593,7 @@ async def handle_product_page(
     except ValueError:
         return
 
-    groups = group_product_variants(products)
+    groups = group_model_variants(products)
     max_page = (len(groups) - 1) // PRODUCT_PAGE_SIZE
     page = min(max(page, 0), max_page)
 
@@ -731,7 +736,7 @@ async def handle_category_selection(
         products,
         parent=(category_search_id, category_page),
     )
-    groups = group_product_variants(products)
+    groups = group_model_variants(products)
 
     await callback.message.edit_text(
         f"Категория: {category.title}\n\n"
@@ -777,33 +782,19 @@ async def handle_variant_group(
 
     try:
         group_index = int(raw_group_index)
-        group = group_product_variants(products)[
+        group = group_model_variants(products)[
             group_index
         ]
     except (ValueError, IndexError):
         return
 
-    memory_groups = group_by_memory(group.products)
-
-    if len(memory_groups) == 1:
-        await show_color_selection(
-            message=callback.message,
-            group=group,
-            products=memory_groups[0][1],
-            back_callback=(
-                f"olp:{search_id}:"
-                f"{group_index // PRODUCT_PAGE_SIZE}"
-            ),
-        )
-        return
-
-    await callback.message.edit_text(
-        f"📱 {group.title}\n\n"
-        "Выбери объём памяти:",
-        reply_markup=build_memory_keyboard(
-            search_id=search_id,
-            group_index=group_index,
-            memory_groups=memory_groups,
+    await show_color_selection(
+        message=callback.message,
+        group=group,
+        products=group.products,
+        back_callback=(
+            f"olp:{search_id}:"
+            f"{group_index // PRODUCT_PAGE_SIZE}"
         ),
     )
 
@@ -839,7 +830,7 @@ async def handle_memory_selection(
     try:
         group_index = int(raw_group_index)
         memory_index = int(raw_memory_index)
-        group = group_product_variants(products)[
+        group = group_model_variants(products)[
             group_index
         ]
         memory_products = group_by_memory(
@@ -1170,7 +1161,7 @@ async def handle_search(
         return
 
     search_id = store_product_search(products)
-    groups = group_product_variants(products)
+    groups = group_model_variants(products)
     keyboard = build_product_keyboard(
         products=products,
         search_id=search_id,
@@ -1194,7 +1185,7 @@ def build_product_keyboard(
     """Создаёт страницу кнопок выбора товара."""
 
     builder = InlineKeyboardBuilder()
-    groups = group_product_variants(products)
+    groups = group_model_variants(products)
     start = page * PRODUCT_PAGE_SIZE
     end = start + PRODUCT_PAGE_SIZE
 
@@ -1209,7 +1200,10 @@ def build_product_keyboard(
                 button_text[:55] + "..."
             )
 
-        if len(group.products) == 1:
+        if (
+            len(group.products) == 1
+            and requested_color_key(group.products[0].title) is None
+        ):
             callback_data = (
                 f"ol:{group.products[0].key}"
             )
@@ -1316,41 +1310,41 @@ async def show_color_selection(
     products: list[ProductCandidate],
     back_callback: str,
 ) -> None:
-    """Показывает цвета или сразу открывает товар."""
+    """Показывает цвет; память уточняется в подписи варианта."""
 
-    if len(products) == 1:
-        await load_product_comparison(
-            message=message,
-            product_key=products[0].key,
-        )
-        return
+    choices: dict[tuple[str, str], ProductCandidate] = {}
+    for product in products:
+        color_key = requested_color_key(product.title) or "unknown"
+        memory = extract_memory(product.title) or "Без выбора памяти"
+        choices.setdefault((color_key, memory), product)
 
+    if len(choices) == 1:
+        only_product = next(iter(choices.values()))
+        if requested_color_key(only_product.title) is None:
+            await load_product_comparison(
+                message=message,
+                product_key=only_product.key,
+            )
+            return
+
+    color_counts = Counter(
+        color_key for color_key, _ in choices
+    )
     builder = InlineKeyboardBuilder()
-    used_labels: set[str] = set()
-
-    sorted_products = sorted(
-        products,
-        key=lambda product: (
-            (
-                display_color(product.title)
-                or product.title
-            ).casefold(),
-            product.title.casefold(),
+    sorted_choices = sorted(
+        choices.items(),
+        key=lambda item: (
+            (selected_color_label(item[1].title) or "").casefold(),
+            item[0][1],
+            item[1].title.casefold(),
         ),
     )
 
-    for product in sorted_products:
-        label = display_color(product.title)
+    for (color_key, memory), product in sorted_choices:
+        label = selected_color_label(product.title) or "Цвет не указан"
+        if color_counts[color_key] > 1:
+            label = f"{label} · {memory}"
 
-        if label is None:
-            label = product.title
-
-        normalized_label = label.casefold()
-
-        if normalized_label in used_labels:
-            continue
-
-        used_labels.add(normalized_label)
         builder.row(
             InlineKeyboardButton(
                 text=(
@@ -1371,7 +1365,8 @@ async def show_color_selection(
 
     await message.edit_text(
         f"📱 {group.title}\n\n"
-        "Выбери цвет или вариант:",
+        "Выбери цвет. Если у цвета несколько вариантов памяти, "
+        "она указана в кнопке:",
         reply_markup=builder.as_markup(),
     )
 

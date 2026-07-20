@@ -274,10 +274,9 @@ class PriceService:
 
             canonical_title = onliner_offers[0].title
 
-        requested_query = self._onliner_queries.get(
-            product_key,
-            canonical_title,
-        )
+        # После выбора карточки именно полное название варианта,
+        # а не исходный широкий запрос, является эталоном мэтчинга.
+        requested_query = canonical_title
         cross_source_query = (
             self._build_cross_source_query(
                 canonical_title
