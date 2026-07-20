@@ -15,6 +15,7 @@ from app.models.catalog import (
     ProductIdentity,
 )
 from app.models.catalog_metrics import CatalogMetrics
+from app.services.catalog_service import CatalogService
 from app.services.catalog_storage import JsonCatalogStorage
 from app.services.master_catalog import MasterCatalog
 
@@ -40,6 +41,28 @@ class CatalogQualityTest(unittest.TestCase):
             identity=identity,
             updated_at=updated_at or datetime.now(timezone.utc),
         )
+
+    def build_review_catalog(
+        self,
+    ) -> tuple[MasterCatalog, str, str]:
+        catalog = MasterCatalog()
+        candidate = catalog.upsert(
+            self.item(
+                "Onliner",
+                "one",
+                "Apple iPhone 17",
+                ProductIdentity(brand="apple", model="iphone 17"),
+            )
+        )
+        product = catalog.upsert(
+            self.item(
+                "21vek",
+                "two",
+                "Aple iPhone 17",
+                ProductIdentity(brand="aple", model="iphone 17"),
+            )
+        )
+        return catalog, product.key, candidate.key
 
     def test_exact_merge_stores_reason_and_confidence(self) -> None:
         catalog = MasterCatalog()
@@ -68,36 +91,13 @@ class CatalogQualityTest(unittest.TestCase):
         )
 
     def test_review_match_creates_separate_product_and_queue_item(self) -> None:
-        catalog = MasterCatalog()
-        first = catalog.upsert_with_result(
-            self.item(
-                "Onliner",
-                "one",
-                "Apple iPhone 17",
-                ProductIdentity(brand="apple", model="iphone 17"),
-            )
-        )
-
-        second = catalog.upsert_with_result(
-            self.item(
-                "21vek",
-                "two",
-                "Aple iPhone 17",
-                ProductIdentity(brand="aple", model="iphone 17"),
-            )
-        )
-
-        self.assertEqual(first.action, CatalogUpsertAction.CREATED)
-        self.assertEqual(second.action, CatalogUpsertAction.CREATED)
-        self.assertNotEqual(first.product.key, second.product.key)
+        catalog, product_key, candidate_key = self.build_review_catalog()
 
         reviews = catalog.pending_reviews()
+        self.assertEqual(len(catalog.products), 2)
         self.assertEqual(len(reviews), 1)
-        self.assertEqual(reviews[0].product_key, second.product.key)
-        self.assertEqual(
-            reviews[0].candidate_product_key,
-            first.product.key,
-        )
+        self.assertEqual(reviews[0].product_key, product_key)
+        self.assertEqual(reviews[0].candidate_product_key, candidate_key)
         self.assertEqual(
             reviews[0].reason,
             "ambiguous_brand_or_model",
@@ -105,23 +105,7 @@ class CatalogQualityTest(unittest.TestCase):
         self.assertGreater(reviews[0].score, 0.9)
 
     def test_review_queue_survives_json_round_trip(self) -> None:
-        catalog = MasterCatalog()
-        catalog.upsert(
-            self.item(
-                "Onliner",
-                "one",
-                "Apple iPhone 17",
-                ProductIdentity(brand="apple", model="iphone 17"),
-            )
-        )
-        catalog.upsert(
-            self.item(
-                "21vek",
-                "two",
-                "Aple iPhone 17",
-                ProductIdentity(brand="aple", model="iphone 17"),
-            )
-        )
+        catalog, _, _ = self.build_review_catalog()
 
         with tempfile.TemporaryDirectory() as directory:
             storage = JsonCatalogStorage(Path(directory) / "catalog.json")
@@ -133,6 +117,62 @@ class CatalogQualityTest(unittest.TestCase):
         self.assertEqual(len(reviews), 1)
         self.assertEqual(reviews[0].source, "21vek")
         self.assertEqual(reviews[0].score, catalog.pending_reviews()[0].score)
+
+    def test_accept_review_merges_products_and_reindexes_offers(self) -> None:
+        catalog, product_key, candidate_key = self.build_review_catalog()
+
+        merged = catalog.accept_review(product_key, candidate_key)
+
+        self.assertEqual(merged.key, candidate_key)
+        self.assertEqual(len(catalog.products), 1)
+        self.assertEqual(len(merged.offers), 2)
+        self.assertEqual(catalog.pending_reviews(), ())
+        moved_offer = next(
+            offer for offer in merged.offers if offer.external_id == "two"
+        )
+        self.assertEqual(moved_offer.match_level, MatchLevel.PROBABLE)
+        self.assertEqual(moved_offer.match_reason, "manual_approval")
+
+        updated = catalog.upsert_with_result(
+            self.item(
+                "21vek",
+                "two",
+                "Aple iPhone 17",
+                ProductIdentity(brand="aple", model="iphone 17"),
+            )
+        )
+        self.assertEqual(updated.action, CatalogUpsertAction.UPDATED)
+        self.assertEqual(updated.product.key, candidate_key)
+
+    def test_reject_review_keeps_products_separate(self) -> None:
+        catalog, product_key, candidate_key = self.build_review_catalog()
+
+        product = catalog.reject_review(product_key, candidate_key)
+
+        self.assertEqual(len(catalog.products), 2)
+        self.assertEqual(catalog.pending_reviews(), ())
+        self.assertEqual(product.offers[0].match_level, MatchLevel.REJECTED)
+        self.assertEqual(product.offers[0].match_reason, "manual_rejection")
+        metrics = catalog.metrics()
+        self.assertEqual(metrics.review_matches, 0)
+        self.assertEqual(metrics.rejected_matches, 1)
+
+    def test_service_persists_accepted_review(self) -> None:
+        catalog, product_key, candidate_key = self.build_review_catalog()
+
+        with tempfile.TemporaryDirectory() as directory:
+            storage = JsonCatalogStorage(Path(directory) / "catalog.json")
+            service = CatalogService(
+                catalog=catalog,
+                storage=storage,
+                restore_on_start=False,
+            )
+            service.accept_review(product_key, candidate_key)
+            restored = CatalogService(storage=storage)
+
+        self.assertEqual(len(restored.catalog.products), 1)
+        self.assertEqual(restored.pending_reviews(), ())
+        self.assertEqual(len(restored.catalog.products[0].offers), 2)
 
     def test_snapshot_metrics_cover_deduplication_and_freshness(self) -> None:
         now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
@@ -220,6 +260,14 @@ class CatalogQualityTest(unittest.TestCase):
         self.assertIn("review: 1", text)
         self.assertIn("пригодность мастер-представления: 75.0%", text)
         self.assertIn("Onliner: 2", text)
+
+        catalog, _, _ = self.build_review_catalog()
+        review_text = format_catalog_reviews(
+            catalog.pending_reviews(),
+            total=1,
+        )
+        self.assertIn("/catalog_review_accept", review_text)
+        self.assertIn("/catalog_review_reject", review_text)
 
 
 if __name__ == "__main__":
