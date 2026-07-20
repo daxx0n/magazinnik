@@ -168,7 +168,6 @@ class CatalogService:
             offer_tuple,
         )
 
-    @synchronized
     async def ingest_offers_with_report_async(
         self,
         offers: Iterable[ProductOffer],

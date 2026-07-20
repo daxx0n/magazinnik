@@ -167,6 +167,14 @@ product_discovery_coordinator: SearchRequestCoordinator[
     tuple[str, str],
     list[ProductCandidate],
 ] = SearchRequestCoordinator()
+category_discovery_coordinator: SearchRequestCoordinator[
+    str,
+    list[ProductCategory],
+] = SearchRequestCoordinator()
+product_discovery_coordinator: SearchRequestCoordinator[
+    tuple[str, str],
+    list[ProductCandidate],
+] = SearchRequestCoordinator()
 
 
 def initialize_price_history(database_path: str | None = None) -> None:
@@ -353,12 +361,6 @@ async def handle_onliner_url(
     except InvalidProductUrlError as error:
         await status_message.edit_text(
             f"Некорректная ссылка.\n\n{error}"
-        )
-        return
-    except SearchBusyError:
-        await message.edit_text(
-            "Сейчас выполняется слишком много сравнений. "
-            "Попробуй ещё раз через несколько секунд."
         )
         return
     except SearchBusyError:
@@ -618,6 +620,12 @@ async def load_product_comparison(
             "Попробуй ещё раз через несколько секунд."
         )
         return
+    except SearchBusyError:
+        await message.edit_text(
+            "Сейчас выполняется слишком много сравнений. "
+            "Попробуй ещё раз через несколько секунд."
+        )
+        return
     except ProductNotFoundError as error:
         await message.edit_text(
             f"Предложения не найдены.\n\n{error}"
@@ -831,6 +839,12 @@ async def handle_category_selection(
                 category=category.key,
             ),
         )
+    except SearchBusyError:
+        await callback.message.edit_text(
+            "Сейчас выполняется слишком много поисков. "
+            "Попробуй ещё раз через несколько секунд."
+        )
+        return
     except SearchBusyError:
         await callback.message.edit_text(
             "Сейчас выполняется слишком много поисков. "
@@ -1293,6 +1307,12 @@ async def handle_search(
                 category=selected_category,
             ),
         )
+    except SearchBusyError:
+        await status_message.edit_text(
+            "Сейчас выполняется слишком много поисков. "
+            "Попробуй ещё раз через несколько секунд."
+        )
+        return
     except SearchBusyError:
         await status_message.edit_text(
             "Сейчас выполняется слишком много поисков. "
@@ -2225,8 +2245,9 @@ def authorized_product_search(
     )
     products = authorized_product_search(callback, search_id)
     if metadata is None or products is None:
-        if products is None:
-            product_session_registry.remove(search_id)
+        product_searches.pop(search_id, None)
+        product_search_parents.pop(search_id, None)
+        product_session_registry.remove(search_id)
         return None
     product_searches.move_to_end(search_id)
     return products
@@ -2247,8 +2268,8 @@ def authorized_category_search(
     )
     session = authorized_category_search(callback, search_id)
     if metadata is None or session is None:
-        if session is None:
-            category_session_registry.remove(search_id)
+        category_searches.pop(search_id, None)
+        category_session_registry.remove(search_id)
         return None
     category_searches.move_to_end(search_id)
     return session
