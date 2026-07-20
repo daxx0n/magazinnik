@@ -23,6 +23,7 @@ class CatalogFeedImportReport:
     created_products: int = 0
     merged_offers: int = 0
     updated_offers: int = 0
+    deactivated_offers: int = 0
     product_keys: tuple[str, ...] = ()
     issues: tuple[CatalogFeedIssue, ...] = ()
 

@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from app.models.catalog import CatalogIngestReport, CatalogUpsertAction
+from app.models.catalog import CatalogIngestReport
 from app.models.catalog_feed import (
     CatalogFeedImportReport,
     CatalogFeedIssue,
@@ -28,6 +28,7 @@ class CatalogFeedImporter:
         *,
         dry_run: bool = False,
         allow_partial: bool = False,
+        snapshot: bool = False,
         default_source: str | None = None,
         format_hint: str | None = None,
     ) -> CatalogFeedImportReport:
@@ -37,6 +38,7 @@ class CatalogFeedImporter:
             feed_path.read_text(encoding="utf-8"),
             dry_run=dry_run,
             allow_partial=allow_partial,
+            snapshot=snapshot,
             default_source=default_source,
             format_hint=hint,
         )
@@ -47,9 +49,13 @@ class CatalogFeedImporter:
         *,
         dry_run: bool = False,
         allow_partial: bool = False,
+        snapshot: bool = False,
         default_source: str | None = None,
         format_hint: str | None = None,
     ) -> CatalogFeedImportReport:
+        if snapshot and allow_partial:
+            raise ValueError("Snapshot import cannot use partial mode")
+
         records, parse_issues, total_records = self._decode_records(
             text,
             format_hint=format_hint,
@@ -67,11 +73,37 @@ class CatalogFeedImporter:
             if item is not None:
                 items.append(item)
 
+        snapshot_source = None
+        if snapshot:
+            if not items:
+                issues.append(
+                    CatalogFeedIssue(
+                        1,
+                        "snapshot",
+                        "snapshot requires at least one valid record",
+                    )
+                )
+            sources = {
+                item.source.strip().casefold(): item.source.strip()
+                for item in items
+            }
+            if len(sources) > 1:
+                issues.append(
+                    CatalogFeedIssue(
+                        1,
+                        "source",
+                        "snapshot must contain exactly one source",
+                    )
+                )
+            elif len(sources) == 1:
+                snapshot_source = next(iter(sources.values()))
+
         invalid_records = len({issue.record for issue in issues})
-        if issues and not allow_partial and not dry_run:
+        reject_actions = bool(issues) and (snapshot or not allow_partial)
+        if reject_actions:
             return CatalogFeedImportReport(
-                status="rejected",
-                dry_run=False,
+                status="dry_run" if dry_run else "rejected",
+                dry_run=dry_run,
                 total_records=total_records,
                 valid_records=len(items),
                 invalid_records=invalid_records,
@@ -79,9 +111,9 @@ class CatalogFeedImporter:
             )
 
         ingest_report = (
-            self._simulate(items)
+            self._simulate(items, snapshot_source=snapshot_source)
             if dry_run
-            else self._import(items)
+            else self._import(items, snapshot_source=snapshot_source)
         )
         return CatalogFeedImportReport(
             status="dry_run" if dry_run else "imported",
@@ -92,28 +124,39 @@ class CatalogFeedImporter:
             created_products=ingest_report.created_products,
             merged_offers=ingest_report.merged_offers,
             updated_offers=ingest_report.updated_offers,
+            deactivated_offers=ingest_report.deactivated_offers,
             product_keys=ingest_report.product_keys,
             issues=tuple(issues),
         )
 
-    def _import(self, items) -> CatalogIngestReport:
+    def _import(
+        self,
+        items,
+        *,
+        snapshot_source: str | None,
+    ) -> CatalogIngestReport:
         if not items:
             return self._empty_report()
-        return self._catalog_service.ingest_external_items_with_report(items)
+        return self._catalog_service.ingest_external_items_with_report(
+            items,
+            deactivate_missing_source=snapshot_source,
+        )
 
-    def _simulate(self, items) -> CatalogIngestReport:
+    def _simulate(
+        self,
+        items,
+        *,
+        snapshot_source: str | None,
+    ) -> CatalogIngestReport:
         catalog = MasterCatalog()
         catalog.restore(deepcopy(self._catalog_service.catalog.products))
-        results = tuple(catalog.upsert_with_result(item) for item in items)
-        actions = tuple(result.action for result in results)
-        return CatalogIngestReport(
-            total_offers=len(results),
-            created_products=actions.count(CatalogUpsertAction.CREATED),
-            merged_offers=actions.count(CatalogUpsertAction.MERGED),
-            updated_offers=actions.count(CatalogUpsertAction.UPDATED),
-            product_keys=tuple(
-                dict.fromkeys(result.product.key for result in results)
-            ),
+        service = CatalogService(
+            catalog=catalog,
+            restore_on_start=False,
+        )
+        return service.ingest_external_items_with_report(
+            items,
+            deactivate_missing_source=snapshot_source,
         )
 
     def _decode_records(

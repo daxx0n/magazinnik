@@ -10,6 +10,20 @@ CATALOG_DATABASE_PATH=data/catalog.sqlite3
 
 Также поддерживается существующий JSON backend через `CATALOG_STORAGE_PATH`.
 
+## Обычный batch и полный snapshot
+
+Обычный импорт добавляет или обновляет только записи из файла. Ранее загруженные офферы сохраняют своё состояние.
+
+Snapshot обозначает **полную выгрузку одного источника**. После успешного upsert офферы этого источника, отсутствующие в новом файле, атомарно получают `available=false`. Другие источники не изменяются.
+
+Защитные ограничения snapshot:
+
+- файл должен содержать хотя бы одну валидную запись;
+- все записи должны принадлежать одному источнику;
+- partial mode запрещён;
+- dry-run заранее показывает `deactivated_offers`;
+- обновления и отключения сохраняются одной транзакцией и совместно откатываются при ошибке.
+
 ## Импорт через Telegram
 
 Доступ ограничивается теми же chat ID, что и другие административные команды:
@@ -22,14 +36,21 @@ CATALOG_FEED_MAX_PENDING=20
 ```
 
 1. Отправить боту `.json`, `.jsonl` или `.ndjson` документ.
-2. В подписи указать `/catalog_feed`. Если в строках отсутствует `source`, после команды можно указать общий источник:
+2. Для обычного batch указать подпись:
 
 ```text
 /catalog_feed Supplier feed
 ```
 
-3. Бот выполнит dry-run и покажет будущие `created/merged/updated` без изменения каталога.
-4. Для реального импорта выполнить выданную одноразовую команду:
+3. Для полной выгрузки одного источника указать:
+
+```text
+/catalog_feed_snapshot Supplier feed
+```
+
+Если каждая запись уже содержит `source`, название после команды можно не указывать.
+
+Бот выполнит dry-run и покажет будущие `created`, `merged`, `updated` и `deactivated` без изменения каталога. Для реального импорта нужно выполнить выданную одноразовую команду:
 
 ```text
 /catalog_feed_confirm TOKEN
@@ -47,9 +68,11 @@ CATALOG_FEED_MAX_PENDING=20
 /catalog_feed_status
 ```
 
-Токен привязан к пользователю и чату, удаляется после первого подтверждения и автоматически истекает. Файл хранится только в памяти до подтверждения или окончания TTL. Через Telegram partial mode намеренно недоступен: наличие любой невалидной записи блокирует подтверждение.
+Токен привязан к пользователю и чату, удаляется после первого подтверждения и автоматически истекает. Файл хранится только в памяти до подтверждения или окончания TTL. Через Telegram partial mode намеренно недоступен.
 
-## Проверка без изменения каталога через CLI
+## Проверка через CLI
+
+Обычный dry-run:
 
 ```bash
 python scripts/import_catalog_feed.py \
@@ -57,11 +80,16 @@ python scripts/import_catalog_feed.py \
   --dry-run
 ```
 
-## Реальный импорт через CLI
+Snapshot dry-run:
 
 ```bash
-python scripts/import_catalog_feed.py feed.json
+python scripts/import_catalog_feed.py supplier.json \
+  --source "Supplier feed" \
+  --snapshot \
+  --dry-run
 ```
+
+После проверки убрать `--dry-run` для реального импорта.
 
 Для JSONL:
 
@@ -69,21 +97,15 @@ python scripts/import_catalog_feed.py feed.json
 python scripts/import_catalog_feed.py feed.jsonl --format jsonl
 ```
 
-Если поле `source` отсутствует во всех строках:
-
-```bash
-python scripts/import_catalog_feed.py feed.jsonl \
-  --format jsonl \
-  --source "Supplier feed"
-```
-
-По умолчанию наличие хотя бы одной невалидной записи отменяет весь импорт. Явно разрешить загрузку валидных строк через CLI можно через:
+Обычный partial batch доступен только через CLI:
 
 ```bash
 python scripts/import_catalog_feed.py feed.jsonl \
   --format jsonl \
   --allow-partial
 ```
+
+`--snapshot` и `--allow-partial` несовместимы.
 
 ## Поля записи
 

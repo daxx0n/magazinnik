@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from io import BytesIO
 
 from aiogram import Bot, F, Router
@@ -20,6 +21,14 @@ logger = logging.getLogger(__name__)
 catalog_feed_upload_manager: CatalogFeedUploadManager | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class CatalogFeedRequest:
+    """Режим и общий источник из подписи Telegram-документа."""
+
+    snapshot: bool
+    default_source: str
+
+
 def initialize_catalog_feed_upload(
     manager: CatalogFeedUploadManager,
 ) -> None:
@@ -36,8 +45,8 @@ async def handle_catalog_feed_document(
 ) -> None:
     """Выполняет dry-run прикреплённого JSON/JSONL-фида."""
 
-    parsed_caption = parse_catalog_feed_caption(message.caption)
-    if parsed_caption is None:
+    request = parse_catalog_feed_request(message.caption)
+    if request is None:
         return
     if not _is_allowed(message):
         await message.answer("Команда доступна только администратору.")
@@ -99,7 +108,8 @@ async def handle_catalog_feed_document(
             user_id=user.id,
             filename=filename,
             text=text,
-            default_source=parsed_caption or None,
+            default_source=request.default_source or None,
+            snapshot=request.snapshot,
         )
     except Exception:
         logger.exception("Catalog feed dry-run failed")
@@ -116,10 +126,15 @@ async def handle_catalog_feed_document(
         return
 
     ttl_minutes = int(manager.config.confirmation_ttl_seconds // 60)
+    dry_run_title = (
+        "✅ Snapshot dry-run завершён"
+        if request.snapshot
+        else "✅ Dry-run завершён"
+    )
     await status_message.edit_text(
         format_catalog_feed_report(
             report,
-            title="✅ Dry-run завершён",
+            title=dry_run_title,
         )
         + "\n\n"
         + "Для одноразового импорта выполни:\n"
@@ -130,7 +145,7 @@ async def handle_catalog_feed_document(
     )
 
 
-@router.message(Command("catalog_feed"))
+@router.message(Command("catalog_feed", "catalog_feed_snapshot"))
 async def handle_catalog_feed_help(message: Message) -> None:
     """Объясняет безопасный процесс загрузки фида."""
 
@@ -143,8 +158,11 @@ async def handle_catalog_feed_help(message: Message) -> None:
         "/catalog_feed\n\n"
         "Если в строках нет поля source, укажи общий источник:\n\n"
         "/catalog_feed Supplier feed\n\n"
-        "Сначала бот выполнит dry-run. Каталог изменится только после "
-        "одноразовой команды подтверждения."
+        "Для полной выгрузки одного источника используй:\n\n"
+        "/catalog_feed_snapshot Supplier feed\n\n"
+        "Snapshot после dry-run пометит недоступными офферы источника, "
+        "которые отсутствуют в новом файле. Каталог изменится только "
+        "после одноразовой команды подтверждения."
     )
 
 
@@ -249,16 +267,32 @@ def get_catalog_feed_upload_manager() -> CatalogFeedUploadManager | None:
     return catalog_feed_upload_manager
 
 
-def parse_catalog_feed_caption(caption: str | None) -> str | None:
-    """Возвращает источник из подписи или None для чужого документа."""
+def parse_catalog_feed_request(
+    caption: str | None,
+) -> CatalogFeedRequest | None:
+    """Разбирает обычный или snapshot импорт из подписи документа."""
 
     parts = (caption or "").strip().split(maxsplit=1)
     if not parts:
         return None
     command = parts[0].split("@", maxsplit=1)[0].casefold()
-    if command != "/catalog_feed":
+    if command == "/catalog_feed":
+        snapshot = False
+    elif command == "/catalog_feed_snapshot":
+        snapshot = True
+    else:
         return None
-    return parts[1].strip() if len(parts) == 2 else ""
+    return CatalogFeedRequest(
+        snapshot=snapshot,
+        default_source=parts[1].strip() if len(parts) == 2 else "",
+    )
+
+
+def parse_catalog_feed_caption(caption: str | None) -> str | None:
+    """Сохраняет совместимый доступ к общему источнику подписи."""
+
+    request = parse_catalog_feed_request(caption)
+    return request.default_source if request is not None else None
 
 
 def command_argument(text: str | None) -> str | None:
@@ -282,6 +316,7 @@ def format_catalog_feed_report(
         f"Новых карточек: {report.created_products}",
         f"Новых привязок: {report.merged_offers}",
         f"Обновлённых офферов: {report.updated_offers}",
+        f"Станут недоступными: {report.deactivated_offers}",
     ]
     if report.issues:
         lines.extend(["", "Первые ошибки:"])
