@@ -61,6 +61,79 @@ async def handle_catalog_reviews(message: Message) -> None:
     await message.answer(text, disable_web_page_preview=True)
 
 
+@router.message(Command("catalog_review_accept"))
+async def handle_catalog_review_accept(message: Message) -> None:
+    """Подтверждает объединение спорной карточки с кандидатом."""
+
+    await _handle_review_decision(message, accept=True)
+
+
+@router.message(Command("catalog_review_reject"))
+async def handle_catalog_review_reject(message: Message) -> None:
+    """Подтверждает, что спорные карточки являются разными."""
+
+    await _handle_review_decision(message, accept=False)
+
+
+async def _handle_review_decision(
+    message: Message,
+    accept: bool,
+) -> None:
+    if not _is_allowed(message):
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    command_name = (
+        "catalog_review_accept"
+        if accept
+        else "catalog_review_reject"
+    )
+    parts = (message.text or "").split()
+    if len(parts) != 3:
+        await message.answer(
+            "Использование:\n"
+            f"/{command_name} PRODUCT_KEY CANDIDATE_KEY"
+        )
+        return
+
+    product_key, candidate_product_key = parts[1:]
+    try:
+        service = get_catalog_service()
+        if accept:
+            product = service.accept_review(
+                product_key,
+                candidate_product_key,
+            )
+            result_text = (
+                "✅ Карточки объединены.\n"
+                f"Мастер-карточка: {product.key} — {product.title}\n"
+                f"Офферов: {len(product.offers)}"
+            )
+        else:
+            product = service.reject_review(
+                product_key,
+                candidate_product_key,
+            )
+            result_text = (
+                "🚫 Карточки оставлены раздельными.\n"
+                f"Карточка: {product.key} — {product.title}"
+            )
+    except ValueError as error:
+        await message.answer(f"Не удалось применить решение: {error}")
+        return
+    except Exception:
+        logger.exception(
+            "Catalog review decision failed: accept=%s product=%s candidate=%s",
+            accept,
+            product_key,
+            candidate_product_key,
+        )
+        await message.answer("Не удалось сохранить решение проверки.")
+        return
+
+    await message.answer(result_text)
+
+
 def get_catalog_service() -> CatalogService:
     """Использует тот же экземпляр каталога, что и рабочий поиск."""
 
@@ -159,6 +232,14 @@ def format_catalog_reviews(
                     "   Решение: "
                     f"{reason_labels.get(review.reason, review.reason)}, "
                     f"score={review.score:.3f}"
+                ),
+                (
+                    "   ✅ /catalog_review_accept "
+                    f"{review.product_key} {review.candidate_product_key}"
+                ),
+                (
+                    "   🚫 /catalog_review_reject "
+                    f"{review.product_key} {review.candidate_product_key}"
                 ),
                 "",
             ]
