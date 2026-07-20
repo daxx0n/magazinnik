@@ -8,6 +8,7 @@ from app.models.catalog import (
     CatalogUpsertResult,
     MasterCatalogProduct,
 )
+from app.models.catalog_metrics import CatalogMetrics
 from app.models.offer import ProductOffer
 from app.services.catalog_adapter import CatalogOfferAdapter
 from app.services.catalog_storage import JsonCatalogStorage
@@ -38,6 +39,7 @@ class CatalogService:
             merged_offers=0,
             updated_offers=0,
         )
+        self._metrics = CatalogMetrics()
 
         if self._storage is not None and restore_on_start:
             self._restore_fail_open()
@@ -50,9 +52,16 @@ class CatalogService:
     def last_report(self) -> CatalogIngestReport:
         return self._last_report
 
+    @property
+    def metrics(self) -> CatalogMetrics:
+        """Возвращает неизменяемый снимок накопленных метрик."""
+
+        return self._metrics
+
     def ingest_offer(self, offer: ProductOffer) -> MasterCatalogProduct:
         result = self._ingest(offer)
         self._last_report = self._build_report((result,))
+        self._record_report(self._last_report)
         self._persist()
         return result.product
 
@@ -62,6 +71,7 @@ class CatalogService:
     ) -> tuple[MasterCatalogProduct, ...]:
         results = tuple(self._ingest(offer) for offer in offers)
         self._last_report = self._build_report(results)
+        self._record_report(self._last_report)
         self._persist()
         return tuple(result.product for result in results)
 
@@ -81,14 +91,26 @@ class CatalogService:
     ) -> MasterCatalogProduct | None:
         """Возвращает мастер-карточку по стабильному ключу."""
 
-        return next(
+        product = next(
             (
-                product
-                for product in self._catalog.products
-                if product.key == product_key
+                item
+                for item in self._catalog.products
+                if item.key == product_key
             ),
             None,
         )
+        self._metrics = CatalogMetrics(
+            **{
+                **self._metrics.__dict__,
+                "lookup_hits": (
+                    self._metrics.lookup_hits + (product is not None)
+                ),
+                "lookup_misses": (
+                    self._metrics.lookup_misses + (product is None)
+                ),
+            }
+        )
+        return product
 
     def save(self) -> None:
         """Принудительно сохраняет текущий снимок каталога."""
@@ -116,6 +138,32 @@ class CatalogService:
                 "Catalog snapshot restore failed: path=%s",
                 self._storage.path,
             )
+
+    def _record_report(self, report: CatalogIngestReport) -> None:
+        product_count = len(report.product_keys)
+        current = self._metrics
+        self._metrics = CatalogMetrics(
+            batches=current.batches + 1,
+            total_offers=current.total_offers + report.total_offers,
+            created_products=(
+                current.created_products + report.created_products
+            ),
+            merged_offers=current.merged_offers + report.merged_offers,
+            updated_offers=(
+                current.updated_offers + report.updated_offers
+            ),
+            single_product_batches=(
+                current.single_product_batches + (product_count == 1)
+            ),
+            ambiguous_batches=(
+                current.ambiguous_batches + (product_count > 1)
+            ),
+            empty_batches=(
+                current.empty_batches + (report.total_offers == 0)
+            ),
+            lookup_hits=current.lookup_hits,
+            lookup_misses=current.lookup_misses,
+        )
 
     @classmethod
     def _storage_from_environment(cls) -> JsonCatalogStorage | None:
