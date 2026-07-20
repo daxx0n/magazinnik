@@ -866,7 +866,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         service._search_five_element_by_query.assert_awaited_once_with(
             query="Духовой шкаф Bosch HBA534EB3",
             canonical_title=canonical,
-            requested_title="Bosch HBA534EB3",
+            requested_title=canonical,
         )
         service._search_twenty_one_vek_by_query.assert_awaited_once_with(
             query="Духовой шкаф Bosch HBA534EB3",
