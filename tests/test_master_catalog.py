@@ -1,6 +1,9 @@
 import unittest
 
-from app.models.catalog import ExternalCatalogItem
+from app.models.catalog import (
+    CatalogUpsertAction,
+    ExternalCatalogItem,
+)
 from app.services.master_catalog import MasterCatalog
 from app.services.product_identity import ProductIdentityBuilder
 
@@ -90,6 +93,74 @@ class MasterCatalogTest(unittest.TestCase):
         self.assertIs(product, updated)
         self.assertEqual(len(product.offers), 1)
         self.assertEqual(product.offers[0].price, 2899)
+
+    def test_reports_created_merged_and_updated_actions(self) -> None:
+        created = self.catalog.upsert_with_result(
+            self.item(
+                "Onliner",
+                "iphone-onliner",
+                "Apple iPhone 15 Pro 256GB Black Titanium",
+                4200,
+            )
+        )
+        merged = self.catalog.upsert_with_result(
+            self.item(
+                "21vek",
+                "iphone-21vek",
+                "Apple iPhone 15 Pro 256 GB Black Titanium",
+                4100,
+            )
+        )
+        updated = self.catalog.upsert_with_result(
+            self.item(
+                "onliner",
+                "iphone-onliner",
+                "Apple iPhone 15 Pro 256GB Black Titanium",
+                4000,
+            )
+        )
+
+        self.assertEqual(created.action, CatalogUpsertAction.CREATED)
+        self.assertEqual(merged.action, CatalogUpsertAction.MERGED)
+        self.assertEqual(updated.action, CatalogUpsertAction.UPDATED)
+        self.assertIs(created.product, merged.product)
+        self.assertIs(created.product, updated.product)
+
+    def test_restore_rebuilds_indexes_and_key_sequence(self) -> None:
+        original = MasterCatalog()
+        product = original.upsert(
+            self.item(
+                "Onliner",
+                "pixel-10",
+                "Google Pixel 10 256GB Obsidian",
+                3000,
+            )
+        )
+
+        restored = MasterCatalog()
+        restored.restore(original.products)
+        update_result = restored.upsert_with_result(
+            self.item(
+                "onliner",
+                "pixel-10",
+                "Google Pixel 10 256GB Obsidian",
+                2899,
+            )
+        )
+        new_product = restored.upsert(
+            self.item(
+                "21vek",
+                "bosch-oven",
+                "Bosch HBA534EB3",
+                1800,
+            )
+        )
+
+        self.assertEqual(update_result.action, CatalogUpsertAction.UPDATED)
+        self.assertIs(update_result.product, product)
+        self.assertEqual(update_result.product.offers[0].price, 2899)
+        self.assertEqual(new_product.key, "product-2")
+        self.assertEqual(restored.offer_count, 2)
 
     def test_searches_master_and_source_titles(self) -> None:
         product = self.catalog.upsert(
