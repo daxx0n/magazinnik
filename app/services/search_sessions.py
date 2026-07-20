@@ -86,6 +86,11 @@ class SearchSessionRegistry:
 
         return session_id in self._sessions
 
+    def contains(self, session_id: str) -> bool:
+        """Проверяет наличие активной записи без изменения LRU."""
+
+        return session_id in self._sessions
+
     def remove(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
 
