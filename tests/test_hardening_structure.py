@@ -82,6 +82,26 @@ class HardeningStructureTest(unittest.TestCase):
         }
         self.assertEqual(duplicates, {})
 
+    def test_search_handler_has_no_duplicate_literal_dict_keys(self) -> None:
+        path = ROOT / "app/handlers/search.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        duplicates: list[tuple[str, int]] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = [
+                key.value
+                for key in node.keys
+                if isinstance(key, ast.Constant)
+                and isinstance(key.value, str)
+            ]
+            duplicates.extend(
+                (key, count)
+                for key, count in Counter(keys).items()
+                if count > 1
+            )
+        self.assertEqual(duplicates, [])
+
     def test_critical_service_classes_have_no_duplicate_methods(self) -> None:
         checks = {
             ROOT / "app/services/catalog_service.py": "CatalogService",
