@@ -114,7 +114,7 @@ class MatchReview:
 
 
 @dataclass(frozen=True, slots=True)
-class CatalogMetrics:
+class CatalogSnapshotMetrics:
     """Снимок качества, дедупликации и свежести мастер-каталога."""
 
     product_count: int
