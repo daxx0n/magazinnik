@@ -137,7 +137,7 @@ class CatalogFeedRecordParser:
         record: int,
         issues: list[CatalogFeedIssue],
     ) -> float | None:
-        if value in {None, ""}:
+        if value is None or value == "":
             return None
         if isinstance(value, bool):
             issues.append(cls._issue(record, "price", "price must be numeric"))
@@ -180,7 +180,7 @@ class CatalogFeedRecordParser:
         record: int,
         issues: list[CatalogFeedIssue],
     ) -> datetime:
-        if value in {None, ""}:
+        if value is None or value == "":
             return datetime.now(timezone.utc)
         try:
             parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
