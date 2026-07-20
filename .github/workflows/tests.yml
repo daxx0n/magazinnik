@@ -51,7 +51,10 @@ jobs:
         shell: bash
         run: |
           set +e
-          python tools/apply_preproduction_hardening.py > migration-output.txt 2>&1
+          {
+            python tools/apply_preproduction_hardening.py
+            python tools/apply_preproduction_fixes.py
+          } > migration-output.txt 2>&1
           status=$?
           cat migration-output.txt
           exit $status
@@ -64,7 +67,7 @@ jobs:
           path: migration-output.txt
 
       - name: Validate syntax
-        run: python -m py_compile app/handlers/search.py app/services/catalog_service.py app/services/catalog_first_search.py app/services/price_service.py app/services/search_input.py app/services/search_load.py app/services/search_sessions.py
+        run: python -m py_compile app/handlers/search.py app/services/catalog_service.py app/services/catalog_first_search.py app/services/price_service.py app/services/price_history.py app/services/search_input.py app/services/search_load.py app/services/search_sessions.py
 
       - name: Upload verified patch
         uses: actions/upload-artifact@v4
@@ -75,12 +78,21 @@ jobs:
             app/services/catalog_service.py
             app/services/catalog_first_search.py
             app/services/price_service.py
+            app/services/price_history.py
 
       - name: Run tests
+        id: tests
         shell: bash
         run: |
           set +e
           python -m unittest discover -s tests > test-output.txt 2>&1
           status=$?
-          tail -n 160 test-output.txt
+          tail -n 200 test-output.txt
           exit $status
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: test-output.txt
