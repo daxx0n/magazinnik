@@ -549,20 +549,40 @@ async def load_product_comparison(
     original_query: str | None = None,
     user_id: int | None = None,
 ) -> None:
-    """Загружает сравнение выбранной модификации."""
+    """Загружает сравнение и пишет один снимок на общую coalesced-задачу."""
 
     await message.edit_text(
         "🔎 Сравниваю цены Onliner, 21vek, "
         "5 элемента, Shop.by, Электросилы и Zeon..."
     )
 
+    async def fetch_and_record() -> ComparisonResult:
+        result = await price_service.search_all_sources_by_onliner_key(
+            product_key,
+            original_query=None,
+        )
+        display_title = (
+            result.master_product_title
+            or result.product_title
+        )
+        try:
+            await asyncio.to_thread(
+                get_price_history_repository().record_offers,
+                product_key,
+                display_title,
+                result.offers,
+            )
+        except Exception:
+            logger.exception(
+                "Price history write failed: product=%s",
+                product_key,
+            )
+        return result
+
     try:
         comparison = await comparison_coordinator.run(
             (product_key, ""),
-            lambda: price_service.search_all_sources_by_onliner_key(
-                product_key,
-                original_query=None,
-            ),
+            fetch_and_record,
         )
         if original_query:
             comparison = replace(
@@ -585,7 +605,6 @@ async def load_product_comparison(
             "Aggregate search unavailable: %s",
             error,
         )
-
         await message.edit_text(
             "Не удалось получить данные "
             "для выбранной модели.\n"
@@ -593,17 +612,11 @@ async def load_product_comparison(
         )
         return
     except Exception:
-        logger.exception(
-            "Unexpected product selection error"
-        )
-
-        await message.edit_text(
-            "Произошла непредвиденная ошибка."
-        )
+        logger.exception("Unexpected product selection error")
+        await message.edit_text("Произошла непредвиденная ошибка.")
         return
 
     chat_id = message_chat_id(message)
-
     if chat_id is not None:
         store_comparison_diagnostics(
             chat_id=chat_id,
@@ -611,23 +624,10 @@ async def load_product_comparison(
             comparison=comparison,
         )
 
-    display_title = (
-        comparison.master_product_title
-        or comparison.product_title
-    )
-    await asyncio.to_thread(
-        get_price_history_repository().record_offers,
-        product_key,
-        display_title,
-        comparison.offers,
-    )
-
     await show_comparison(
         message=message,
         offers=comparison.offers,
-        source_statuses=(
-            comparison.source_statuses
-        ),
+        source_statuses=comparison.source_statuses,
         product_key=product_key,
         product_title=(
             comparison.master_product_title
@@ -2113,143 +2113,13 @@ def authorized_product_search(
         ),
         user_id=callback_user_id(callback),
     )
-    products = authorized_product_search(callback, search_id)
-    if metadata is None or products is None:
-        product_searches.pop(search_id, None)
-        product_search_parents.pop(search_id, None)
-        product_session_registry.remove(search_id)
-        return None
-    product_searches.move_to_end(search_id)
-    return products
-
-
-def authorized_category_search(
-    callback: CallbackQuery,
-    search_id: str,
-) -> CategorySearchSession | None:
-    metadata = category_session_registry.authorize(
-        search_id,
-        chat_id=(
-            message_chat_id(callback.message)
-            if callback.message is not None
-            else None
-        ),
-        user_id=callback_user_id(callback),
-    )
-    session = authorized_category_search(callback, search_id)
-    if metadata is None or session is None:
-        category_searches.pop(search_id, None)
-        category_session_registry.remove(search_id)
-        return None
-    category_searches.move_to_end(search_id)
-    return session
-
-
-
-def callback_user_id(callback: CallbackQuery) -> int | None:
-    user = getattr(callback, "from_user", None)
-    user_id = getattr(user, "id", None)
-    return user_id if isinstance(user_id, int) else None
-
-
-def message_user_id(message: Message) -> int | None:
-    user = getattr(message, "from_user", None)
-    user_id = getattr(user, "id", None)
-    return user_id if isinstance(user_id, int) else None
-
-
-def message_interaction_key(
-    message: Message,
-) -> tuple[int, int | None] | None:
-    chat_id = message_chat_id(message)
-    if chat_id is None:
-        return None
-    return chat_id, message_user_id(message)
-
-
-def authorized_product_search(
-    callback: CallbackQuery,
-    search_id: str,
-) -> list[ProductCandidate] | None:
-    metadata = product_session_registry.authorize(
-        search_id,
-        chat_id=(
-            message_chat_id(callback.message)
-            if callback.message is not None
-            else None
-        ),
-        user_id=callback_user_id(callback),
-    )
-    products = authorized_product_search(callback, search_id)
-    if metadata is None or products is None:
-        product_searches.pop(search_id, None)
-        product_search_parents.pop(search_id, None)
-        product_session_registry.remove(search_id)
-        return None
-    product_searches.move_to_end(search_id)
-    return products
-
-
-def authorized_category_search(
-    callback: CallbackQuery,
-    search_id: str,
-) -> CategorySearchSession | None:
-    metadata = category_session_registry.authorize(
-        search_id,
-        chat_id=(
-            message_chat_id(callback.message)
-            if callback.message is not None
-            else None
-        ),
-        user_id=callback_user_id(callback),
-    )
-    session = authorized_category_search(callback, search_id)
-    if metadata is None or session is None:
-        category_searches.pop(search_id, None)
-        category_session_registry.remove(search_id)
-        return None
-    category_searches.move_to_end(search_id)
-    return session
-
-
-
-def callback_user_id(callback: CallbackQuery) -> int | None:
-    user = getattr(callback, "from_user", None)
-    user_id = getattr(user, "id", None)
-    return user_id if isinstance(user_id, int) else None
-
-
-def message_user_id(message: Message) -> int | None:
-    user = getattr(message, "from_user", None)
-    user_id = getattr(user, "id", None)
-    return user_id if isinstance(user_id, int) else None
-
-
-def message_interaction_key(
-    message: Message,
-) -> tuple[int, int | None] | None:
-    chat_id = message_chat_id(message)
-    if chat_id is None:
-        return None
-    return chat_id, message_user_id(message)
-
-
-def authorized_product_search(
-    callback: CallbackQuery,
-    search_id: str,
-) -> list[ProductCandidate] | None:
-    metadata = product_session_registry.authorize(
-        search_id,
-        chat_id=(
-            message_chat_id(callback.message)
-            if callback.message is not None
-            else None
-        ),
-        user_id=callback_user_id(callback),
-    )
     products = product_searches.get(search_id)
-    if metadata is None or products is None:
-        product_searches.pop(search_id, None)
+    if metadata is None:
+        if not product_session_registry.contains(search_id):
+            product_searches.pop(search_id, None)
+            product_search_parents.pop(search_id, None)
+        return None
+    if products is None:
         product_search_parents.pop(search_id, None)
         product_session_registry.remove(search_id)
         return None
@@ -2271,12 +2141,16 @@ def authorized_category_search(
         user_id=callback_user_id(callback),
     )
     session = category_searches.get(search_id)
-    if metadata is None or session is None:
-        category_searches.pop(search_id, None)
+    if metadata is None:
+        if not category_session_registry.contains(search_id):
+            category_searches.pop(search_id, None)
+        return None
+    if session is None:
         category_session_registry.remove(search_id)
         return None
     category_searches.move_to_end(search_id)
     return session
+
 
 
 def store_comparison_diagnostics(
