@@ -1371,9 +1371,7 @@ async def show_color_selection(
     )
 
     await message.edit_text(
-        f"📱 {group.title}
-
-"
+        f"📱 {group.title}\n\n"
         "Выбери цвет. Если у цвета несколько вариантов памяти, "
         "она указана в кнопке:",
         reply_markup=builder.as_markup(),

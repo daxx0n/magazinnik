@@ -164,10 +164,16 @@ def generation_mismatch(
     )
 
 
+def color_neutral_title(title: str) -> str:
+    """Удаляет цвет, сохраняя модель, память, версию и ревизию."""
+
+    return _strip_color_suffix(title)
+
+
 def model_variant_title(title: str) -> str:
     """Возвращает модель без памяти и цветового оформления."""
 
-    result = _strip_color_suffix(title)
+    result = color_neutral_title(title)
     normalized = base_product_title(result)
     return normalized or title
 

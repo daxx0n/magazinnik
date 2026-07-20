@@ -13,6 +13,7 @@ from app.models.product import ProductCandidate
 from app.models.search_result import ComparisonResult, SourceSearchStatus
 from app.services.catalog_service import CatalogService
 from app.services.model_selection import (
+    color_neutral_title,
     explicit_color_mismatch,
     generation_mismatch,
     requested_color_key,
@@ -190,24 +191,26 @@ class CatalogFirstPriceService(PriceService):
 
         reference_color = requested_color_key(reference_title)
         candidate_color = requested_color_key(candidate_title)
+        reason = PriceService._model_mismatch_reason(
+            canonical_title=color_neutral_title(canonical_title),
+            candidate_title=color_neutral_title(candidate_title),
+            requested_title=color_neutral_title(reference_title),
+        )
+        if reason is not None:
+            return reason
+
         if explicit_color_mismatch(
             requested_title=reference_title,
             candidate_title=candidate_title,
         ):
             return "color_unknown" if candidate_color is None else "color"
 
-        reason = PriceService._model_mismatch_reason(
-            canonical_title=canonical_title,
-            candidate_title=candidate_title,
-            requested_title=reference_title,
-        )
         if (
-            reason == "color"
-            and reference_color is not None
+            reference_color is not None
             and candidate_color == reference_color
         ):
             return None
-        return reason
+        return None
 
     def _candidate_from_product(
         self,
