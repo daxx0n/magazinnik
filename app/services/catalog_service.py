@@ -131,6 +131,34 @@ class CatalogService:
 
         return self._catalog.pending_reviews(limit=limit)
 
+    def accept_review(
+        self,
+        product_key: str,
+        candidate_product_key: str,
+    ) -> MasterCatalogProduct:
+        """Подтверждает объединение спорной мастер-карточки."""
+
+        product = self._catalog.accept_review(
+            product_key,
+            candidate_product_key,
+        )
+        self._persist()
+        return product
+
+    def reject_review(
+        self,
+        product_key: str,
+        candidate_product_key: str,
+    ) -> MasterCatalogProduct:
+        """Подтверждает, что спорные карточки являются разными."""
+
+        product = self._catalog.reject_review(
+            product_key,
+            candidate_product_key,
+        )
+        self._persist()
+        return product
+
     def save(self) -> None:
         """Принудительно сохраняет текущий снимок каталога."""
 
