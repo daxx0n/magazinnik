@@ -40,6 +40,13 @@ jobs:
               exit 1
             }
 
+      - name: Upload migration diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-presentation-migration-error
+          path: migration-output.txt
+
       - name: Run tests
         run: python -m unittest discover -s tests
 
@@ -55,15 +62,4 @@ jobs:
                   tests/test_catalog_presentation.py \
                   tests/test_catalog_lookup.py
           git commit -m "Add feature-flagged master catalog presentation"
-          git push
-
-      - name: Save migration failure
-        if: failure()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python tools/apply_catalog_presentation.py \
-            > migration-error.txt 2>&1 || true
-          git add migration-error.txt
-          git commit -m "Capture catalog presentation migration failure"
           git push
