@@ -7,7 +7,7 @@ from app.models.catalog import MatchLevel, MatchResult, ProductIdentity
 class ProductMatcher:
     """Сопоставляет нормализованные карточки без смешивания вариантов."""
 
-    _conflict_fields = ("brand", "model", "memory", "color", "revision")
+    _variant_fields = ("memory", "color", "revision")
 
     def match(
         self,
@@ -16,21 +16,21 @@ class ProductMatcher:
     ) -> MatchResult:
         """Возвращает уровень уверенности и объяснимую причину решения."""
 
-        conflicts = tuple(
+        variant_conflicts = tuple(
             field_name
-            for field_name in self._conflict_fields
+            for field_name in self._variant_fields
             if self._values_conflict(
                 getattr(canonical, field_name),
                 getattr(candidate, field_name),
             )
         )
 
-        if conflicts:
+        if variant_conflicts:
             return MatchResult(
                 level=MatchLevel.REJECTED,
                 score=0.0,
                 reason="variant_conflict",
-                conflicts=conflicts,
+                conflicts=variant_conflicts,
             )
 
         if self._same_identifier(canonical.ean, candidate.ean):
@@ -64,9 +64,17 @@ class ProductMatcher:
                 reason="same_model_no_variant_conflicts",
             )
 
+        if self._is_model_family_conflict(canonical.model, candidate.model):
+            return MatchResult(
+                level=MatchLevel.REJECTED,
+                score=0.0,
+                reason="different_product",
+                conflicts=("model",),
+            )
+
         combined_score = round(brand_score * 0.25 + model_score * 0.75, 4)
 
-        if combined_score >= 0.9:
+        if brand_score >= 0.9 and model_score >= 0.9:
             return MatchResult(
                 level=MatchLevel.PROBABLE,
                 score=combined_score,
@@ -94,6 +102,20 @@ class ProductMatcher:
         normalized = value.casefold().replace("ё", "е")
         normalized = re.sub(r"[^a-zа-я0-9]+", "", normalized)
         return normalized or None
+
+    @classmethod
+    def _tokenize(cls, value: str | None) -> tuple[str, ...]:
+        if value is None:
+            return ()
+
+        return tuple(
+            token
+            for token in re.findall(
+                r"[a-zа-я0-9]+",
+                value.casefold().replace("ё", "е"),
+            )
+            if token
+        )
 
     def _values_conflict(
         self,
@@ -142,13 +164,12 @@ class ProductMatcher:
         left: ProductIdentity,
         right: ProductIdentity,
     ) -> bool:
-        variant_fields = ("memory", "color", "revision")
         comparable_values = [
             (
                 self._normalize(getattr(left, field_name)),
                 self._normalize(getattr(right, field_name)),
             )
-            for field_name in variant_fields
+            for field_name in self._variant_fields
         ]
         known_values = [
             values
@@ -159,3 +180,21 @@ class ProductMatcher:
             left_value == right_value
             for left_value, right_value in known_values
         )
+
+    @classmethod
+    def _is_model_family_conflict(
+        cls,
+        left: str | None,
+        right: str | None,
+    ) -> bool:
+        left_tokens = cls._tokenize(left)
+        right_tokens = cls._tokenize(right)
+
+        if not left_tokens or not right_tokens:
+            return False
+
+        family_markers = {"air", "lite", "max", "mini", "plus", "pro", "slim", "ultra"}
+        left_markers = set(left_tokens) & family_markers
+        right_markers = set(right_tokens) & family_markers
+
+        return left_markers != right_markers
