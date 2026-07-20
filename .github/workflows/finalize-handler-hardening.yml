@@ -22,7 +22,7 @@ jobs:
           python-version: '3.13'
       - name: Apply final cleanup
         run: python tools/finalize_handler_hardening.py
-      - name: Fix generated message escapes
+      - name: Fix generated text and duplicate diagnostics keys
         shell: bash
         run: |
           python - <<'PY'
@@ -37,6 +37,9 @@ jobs:
               '            "для выбранной модели.\n"\n',
               '            "для выбранной модели.\\n"\n',
           )
+          duplicate = '        "color_unknown": "цвет не указан",\n'
+          while duplicate + duplicate in text:
+              text = text.replace(duplicate + duplicate, duplicate)
           path.write_text(text, encoding="utf-8")
           PY
       - name: Validate syntax
