@@ -144,6 +144,8 @@ class SqliteCatalogStorage:
         self.initialize()
         connection = self._connect()
         try:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
             connection.execute("BEGIN IMMEDIATE")
             connection.execute("DELETE FROM catalog_offers")
             connection.execute("DELETE FROM catalog_products")
