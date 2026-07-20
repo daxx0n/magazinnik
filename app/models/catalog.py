@@ -91,6 +91,7 @@ class CatalogIngestReport:
     created_products: int
     merged_offers: int
     updated_offers: int
+    deactivated_offers: int = 0
     product_keys: tuple[str, ...] = ()
 
 
