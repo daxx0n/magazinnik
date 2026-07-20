@@ -1,0 +1,184 @@
+import logging
+import os
+
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Message
+
+from app.handlers import search
+from app.models.catalog import CatalogSnapshotMetrics, MatchReview
+from app.models.catalog_metrics import CatalogMetrics
+from app.services.catalog_service import CatalogService
+
+
+router = Router(name="catalog")
+logger = logging.getLogger(__name__)
+
+
+@router.message(Command("catalog_stats"))
+async def handle_catalog_stats(message: Message) -> None:
+    """Показывает метрики дедупликации и свежести каталога."""
+
+    if not _is_allowed(message):
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    try:
+        service = get_catalog_service()
+        text = format_catalog_stats(
+            snapshot=service.snapshot_metrics(),
+            runtime=service.metrics,
+        )
+    except Exception:
+        logger.exception("Catalog metrics command failed")
+        await message.answer("Не удалось получить метрики каталога.")
+        return
+
+    await message.answer(text)
+
+
+@router.message(Command("catalog_reviews"))
+async def handle_catalog_reviews(message: Message) -> None:
+    """Показывает последние спорные совпадения для проверки."""
+
+    if not _is_allowed(message):
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    try:
+        service = get_catalog_service()
+        snapshot = service.snapshot_metrics()
+        reviews = service.pending_reviews(limit=10)
+        text = format_catalog_reviews(
+            reviews,
+            total=snapshot.review_matches,
+        )
+    except Exception:
+        logger.exception("Catalog reviews command failed")
+        await message.answer("Не удалось получить очередь проверки.")
+        return
+
+    await message.answer(text, disable_web_page_preview=True)
+
+
+def get_catalog_service() -> CatalogService:
+    """Использует тот же экземпляр каталога, что и рабочий поиск."""
+
+    return search.price_service._catalog_service
+
+
+def format_catalog_stats(
+    snapshot: CatalogSnapshotMetrics,
+    runtime: CatalogMetrics,
+) -> str:
+    """Формирует компактный отчёт качества мастер-каталога."""
+
+    lines = [
+        "📊 Мастер-каталог",
+        "",
+        f"Карточек: {snapshot.product_count}",
+        f"Офферов: {snapshot.offer_count}",
+        (
+            "Объединённых офферов: "
+            f"{snapshot.merged_offer_count} "
+            f"({snapshot.duplicate_rate:.1%})"
+        ),
+        f"Карточек с одним источником: {snapshot.single_source_products}",
+        f"Карточек с несколькими источниками: {snapshot.multi_source_products}",
+        "",
+        "Качество сопоставления:",
+        f"• exact: {snapshot.exact_matches}",
+        f"• probable: {snapshot.probable_matches}",
+        f"• review: {snapshot.review_matches}",
+        f"• rejected: {snapshot.rejected_matches}",
+        (
+            "• доля exact среди автоматических: "
+            f"{snapshot.exact_share:.1%}"
+        ),
+        "",
+        "Свежесть за 24 часа:",
+        f"• свежих офферов: {snapshot.fresh_offers}",
+        f"• устаревших офферов: {snapshot.stale_offers}",
+        f"• недоступных офферов: {snapshot.unavailable_offers}",
+        "",
+        "Рабочие пакеты после запуска:",
+        f"• обработано: {runtime.batches}",
+        f"• однозначных: {runtime.single_product_batches}",
+        f"• неоднозначных: {runtime.ambiguous_batches}",
+        (
+            "• пригодность мастер-представления: "
+            f"{runtime.presentation_eligibility_rate:.1%}"
+        ),
+    ]
+
+    if snapshot.source_offer_counts:
+        lines.extend(["", "Источники:"])
+        lines.extend(
+            f"• {source}: {count}"
+            for source, count in snapshot.source_offer_counts
+        )
+
+    return "\n".join(lines)
+
+
+def format_catalog_reviews(
+    reviews: tuple[MatchReview, ...],
+    total: int,
+) -> str:
+    """Формирует очередь спорных совпадений для ручной проверки."""
+
+    if not reviews:
+        return "🧩 Очередь проверки пуста."
+
+    reason_labels = {
+        "ambiguous_brand_or_model": "неоднозначный бренд или модель",
+        "different_product": "возможно другой товар",
+        "variant_conflict": "конфликт модификации",
+    }
+    lines = [
+        "🧩 Очередь проверки",
+        f"Всего спорных совпадений: {total}",
+        f"Показано последних: {len(reviews)}",
+        "",
+    ]
+
+    for index, review in enumerate(reviews, start=1):
+        lines.extend(
+            [
+                f"{index}. {review.incoming_title}",
+                f"   Источник: {review.source}",
+                (
+                    f"   Новая карточка: {review.product_key} — "
+                    f"{review.product_title}"
+                ),
+                (
+                    f"   Кандидат: {review.candidate_product_key} — "
+                    f"{review.candidate_product_title}"
+                ),
+                (
+                    "   Решение: "
+                    f"{reason_labels.get(review.reason, review.reason)}, "
+                    f"score={review.score:.3f}"
+                ),
+                "",
+            ]
+        )
+
+    return "\n".join(lines).rstrip()
+
+
+def _is_allowed(message: Message) -> bool:
+    raw_ids = os.getenv("CATALOG_ADMIN_CHAT_IDS", "").strip()
+    if not raw_ids:
+        return True
+
+    allowed_ids: set[int] = set()
+    for raw_id in raw_ids.split(","):
+        try:
+            allowed_ids.add(int(raw_id.strip()))
+        except ValueError:
+            logger.warning("Invalid CATALOG_ADMIN_CHAT_IDS value: %r", raw_id)
+
+    chat = getattr(message, "chat", None)
+    chat_id = getattr(chat, "id", None)
+    return isinstance(chat_id, int) and chat_id in allowed_ids
