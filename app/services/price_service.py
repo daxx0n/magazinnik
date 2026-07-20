@@ -1267,9 +1267,14 @@ class PriceService:
         }
 
         def is_accessory(value: str) -> bool:
+            normalized_value = re.sub(
+                r"\b(?:без|с)\s+дисковод\w*\b",
+                " ",
+                value.casefold().replace("ё", "е"),
+            )
             return any(
                 token.startswith(marker)
-                for token in value.split()
+                for token in normalized_value.split()
                 for marker in accessory_markers
             )
 
