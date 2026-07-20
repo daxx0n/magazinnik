@@ -86,6 +86,21 @@ def requested_color_key(value: str | None) -> str | None:
     return None
 
 
+def explicit_color_mismatch(
+    requested_title: str | None,
+    candidate_title: str,
+) -> bool:
+    """Сравнивает цвета только когда пользователь указал цвет."""
+
+    requested_color = requested_color_key(requested_title)
+    candidate_color = requested_color_key(candidate_title)
+    return bool(
+        requested_color is not None
+        and candidate_color is not None
+        and requested_color != candidate_color
+    )
+
+
 def significant_model_numbers(value: str) -> set[str]:
     """Извлекает номер поколения, исключая RAM и накопитель."""
 
@@ -104,7 +119,10 @@ def significant_model_numbers(value: str) -> set[str]:
 
     return {
         number
-        for number in re.findall(r"(?<![a-zа-я0-9])\d{1,2}(?![a-zа-я0-9])", normalized)
+        for number in re.findall(
+            r"(?<![a-zа-я0-9])\d{1,2}(?![a-zа-я0-9])",
+            normalized,
+        )
         if number not in memory_amounts
     }
 
