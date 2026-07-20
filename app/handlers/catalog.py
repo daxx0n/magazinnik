@@ -28,6 +28,8 @@ async def handle_catalog_stats(message: Message) -> None:
         text = format_catalog_stats(
             snapshot=service.snapshot_metrics(),
             runtime=service.metrics,
+            storage_backend=service.storage_backend,
+            storage_path=service.storage_path,
         )
     except Exception:
         logger.exception("Catalog metrics command failed")
@@ -143,46 +145,60 @@ def get_catalog_service() -> CatalogService:
 def format_catalog_stats(
     snapshot: CatalogSnapshotMetrics,
     runtime: CatalogMetrics,
+    storage_backend: str | None = None,
+    storage_path: str | None = None,
 ) -> str:
     """Формирует компактный отчёт качества мастер-каталога."""
 
     lines = [
         "📊 Мастер-каталог",
         "",
-        f"Карточек: {snapshot.product_count}",
-        f"Офферов: {snapshot.offer_count}",
-        (
-            "Объединённых офферов: "
-            f"{snapshot.merged_offer_count} "
-            f"({snapshot.duplicate_rate:.1%})"
-        ),
-        f"Карточек с одним источником: {snapshot.single_source_products}",
-        f"Карточек с несколькими источниками: {snapshot.multi_source_products}",
-        "",
-        "Качество сопоставления:",
-        f"• exact: {snapshot.exact_matches}",
-        f"• probable: {snapshot.probable_matches}",
-        f"• review: {snapshot.review_matches}",
-        f"• rejected: {snapshot.rejected_matches}",
-        (
-            "• доля exact среди автоматических: "
-            f"{snapshot.exact_share:.1%}"
-        ),
-        "",
-        "Свежесть за 24 часа:",
-        f"• свежих офферов: {snapshot.fresh_offers}",
-        f"• устаревших офферов: {snapshot.stale_offers}",
-        f"• недоступных офферов: {snapshot.unavailable_offers}",
-        "",
-        "Рабочие пакеты после запуска:",
-        f"• обработано: {runtime.batches}",
-        f"• однозначных: {runtime.single_product_batches}",
-        f"• неоднозначных: {runtime.ambiguous_batches}",
-        (
-            "• пригодность мастер-представления: "
-            f"{runtime.presentation_eligibility_rate:.1%}"
-        ),
     ]
+
+    if storage_backend:
+        lines.append(f"Хранилище: {storage_backend}")
+    if storage_path:
+        lines.append(f"Путь: {storage_path}")
+    if storage_backend or storage_path:
+        lines.append("")
+
+    lines.extend(
+        [
+            f"Карточек: {snapshot.product_count}",
+            f"Офферов: {snapshot.offer_count}",
+            (
+                "Объединённых офферов: "
+                f"{snapshot.merged_offer_count} "
+                f"({snapshot.duplicate_rate:.1%})"
+            ),
+            f"Карточек с одним источником: {snapshot.single_source_products}",
+            f"Карточек с несколькими источниками: {snapshot.multi_source_products}",
+            "",
+            "Качество сопоставления:",
+            f"• exact: {snapshot.exact_matches}",
+            f"• probable: {snapshot.probable_matches}",
+            f"• review: {snapshot.review_matches}",
+            f"• rejected: {snapshot.rejected_matches}",
+            (
+                "• доля exact среди автоматических: "
+                f"{snapshot.exact_share:.1%}"
+            ),
+            "",
+            "Свежесть за 24 часа:",
+            f"• свежих офферов: {snapshot.fresh_offers}",
+            f"• устаревших офферов: {snapshot.stale_offers}",
+            f"• недоступных офферов: {snapshot.unavailable_offers}",
+            "",
+            "Рабочие пакеты после запуска:",
+            f"• обработано: {runtime.batches}",
+            f"• однозначных: {runtime.single_product_batches}",
+            f"• неоднозначных: {runtime.ambiguous_batches}",
+            (
+                "• пригодность мастер-представления: "
+                f"{runtime.presentation_eligibility_rate:.1%}"
+            ),
+        ]
+    )
 
     if snapshot.source_offer_counts:
         lines.extend(["", "Источники:"])
