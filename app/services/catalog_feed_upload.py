@@ -69,6 +69,7 @@ class CatalogFeedUploadSession:
     text: str
     format_hint: str
     default_source: str | None
+    snapshot: bool
     created_at: float
     dry_run_report: CatalogFeedImportReport
 
@@ -106,6 +107,7 @@ class CatalogFeedUploadManager:
         filename: str,
         text: str,
         default_source: str | None = None,
+        snapshot: bool = False,
     ) -> tuple[
         CatalogFeedUploadSession | None,
         CatalogFeedImportReport,
@@ -118,6 +120,7 @@ class CatalogFeedUploadManager:
             text,
             dry_run=True,
             allow_partial=False,
+            snapshot=snapshot,
             default_source=default_source,
             format_hint=format_hint,
         )
@@ -133,6 +136,7 @@ class CatalogFeedUploadManager:
             text=text,
             format_hint=format_hint,
             default_source=default_source,
+            snapshot=snapshot,
             created_at=self._clock(),
             dry_run_report=report,
         )
@@ -157,6 +161,7 @@ class CatalogFeedUploadManager:
             session.text,
             dry_run=False,
             allow_partial=False,
+            snapshot=session.snapshot,
             default_source=session.default_source,
             format_hint=session.format_hint,
         )
