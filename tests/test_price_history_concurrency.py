@@ -67,6 +67,25 @@ class PriceHistoryConcurrencyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results, [True] * 50)
         self.assertEqual(len(self.repository.active_alerts()), 50)
 
+    async def test_parallel_double_toggle_is_atomic(self) -> None:
+        results = await asyncio.gather(
+            *(
+                asyncio.to_thread(
+                    self.repository.toggle_alert,
+                    777,
+                    "pixel8",
+                    "Google Pixel 8",
+                    "Pixel",
+                    2_000.0,
+                    "BYN",
+                )
+                for _ in range(2)
+            )
+        )
+
+        self.assertEqual(sorted(results), [False, True])
+        self.assertEqual(self.repository.active_alerts(), [])
+
     def test_invalid_prices_are_not_persisted(self) -> None:
         invalid = ProductOffer(
             source="source",
