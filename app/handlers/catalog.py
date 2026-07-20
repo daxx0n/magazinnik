@@ -8,11 +8,23 @@ from aiogram.types import Message
 from app.handlers import search
 from app.models.catalog import CatalogSnapshotMetrics, MatchReview
 from app.models.catalog_metrics import CatalogMetrics
+from app.services.catalog_refresh import (
+    CatalogRefreshReport,
+    CatalogRefreshService,
+)
 from app.services.catalog_service import CatalogService
 
 
 router = Router(name="catalog")
 logger = logging.getLogger(__name__)
+catalog_refresh_service: CatalogRefreshService | None = None
+
+
+def initialize_catalog_refresh(service: CatalogRefreshService) -> None:
+    """Подключает общий refresh-сервис к административным командам."""
+
+    global catalog_refresh_service
+    catalog_refresh_service = service
 
 
 @router.message(Command("catalog_stats"))
@@ -37,6 +49,61 @@ async def handle_catalog_stats(message: Message) -> None:
         return
 
     await message.answer(text)
+
+
+@router.message(Command("catalog_refresh_status"))
+async def handle_catalog_refresh_status(message: Message) -> None:
+    """Показывает настройки и результат фонового обновления."""
+
+    if not _is_allowed(message):
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    service = get_catalog_refresh_service()
+    if service is None:
+        await message.answer("Refresh-сервис каталога не инициализирован.")
+        return
+
+    try:
+        text = format_catalog_refresh_status(service)
+    except Exception:
+        logger.exception("Catalog refresh status command failed")
+        await message.answer("Не удалось получить статус обновления каталога.")
+        return
+
+    await message.answer(text)
+
+
+@router.message(Command("catalog_refresh_run"))
+async def handle_catalog_refresh_run(message: Message) -> None:
+    """Вручную запускает один ограниченный цикл обновления."""
+
+    if not _is_allowed(message):
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    service = get_catalog_refresh_service()
+    if service is None:
+        await message.answer("Refresh-сервис каталога не инициализирован.")
+        return
+
+    if service.running:
+        await message.answer("Обновление каталога уже выполняется.")
+        return
+
+    status_message = await message.answer(
+        "🔄 Обновляю устаревшие мастер-карточки..."
+    )
+    try:
+        report = await service.refresh_once()
+    except Exception:
+        logger.exception("Manual catalog refresh failed")
+        await status_message.edit_text(
+            "Не удалось выполнить обновление каталога."
+        )
+        return
+
+    await status_message.edit_text(format_catalog_refresh_report(report))
 
 
 @router.message(Command("catalog_reviews"))
@@ -142,6 +209,10 @@ def get_catalog_service() -> CatalogService:
     return search.price_service._catalog_service
 
 
+def get_catalog_refresh_service() -> CatalogRefreshService | None:
+    return catalog_refresh_service
+
+
 def format_catalog_stats(
     snapshot: CatalogSnapshotMetrics,
     runtime: CatalogMetrics,
@@ -205,6 +276,69 @@ def format_catalog_stats(
         lines.extend(
             f"• {source}: {count}"
             for source, count in snapshot.source_offer_counts
+        )
+
+    return "\n".join(lines)
+
+
+def format_catalog_refresh_status(
+    service: CatalogRefreshService,
+) -> str:
+    config = service.config
+    stale_count = len(service.stale_products())
+    lines = [
+        "🔄 Обновление мастер-каталога",
+        "",
+        (
+            "Фоновый режим: включён"
+            if config.enabled
+            else "Фоновый режим: выключен"
+        ),
+        f"Сейчас выполняется: {'да' if service.running else 'нет'}",
+        f"Устаревших карточек: {stale_count}",
+        f"Интервал: {config.interval_seconds:.0f} сек.",
+        f"Размер пакета: {config.batch_size}",
+        f"Параллельность: {config.concurrency}",
+    ]
+
+    if service.last_report is None:
+        lines.extend(["", "Последний запуск: ещё не выполнялся"])
+    else:
+        lines.extend(
+            [
+                "",
+                "Последний запуск:",
+                format_catalog_refresh_report(service.last_report),
+            ]
+        )
+
+    return "\n".join(lines)
+
+
+def format_catalog_refresh_report(
+    report: CatalogRefreshReport,
+) -> str:
+    if report.status == "overlap_skipped":
+        return "⏭ Запуск пропущен: обновление уже выполняется."
+
+    lines = [
+        "✅ Цикл обновления завершён",
+        f"Начало: {report.started_at.astimezone().strftime('%d.%m.%Y %H:%M:%S')}",
+        f"Выбрано карточек: {report.selected_products}",
+        f"Обновлено: {report.refreshed_products}",
+        f"Без изменений: {report.unchanged_products}",
+        f"Ошибок: {report.failed_products}",
+        f"Длительность: {report.duration_seconds:.1f} сек.",
+    ]
+
+    failed_items = [
+        item for item in report.items if item.state == "failed"
+    ]
+    if failed_items:
+        lines.extend(["", "Ошибки:"])
+        lines.extend(
+            f"• {item.product_key}: {item.error}"
+            for item in failed_items[:5]
         )
 
     return "\n".join(lines)
