@@ -168,30 +168,6 @@ class CatalogService:
             offer_tuple,
         )
 
-    async def ingest_offers_with_report_async(
-        self,
-        offers: Iterable[ProductOffer],
-    ) -> CatalogIngestReport:
-        """Сохраняет каталог вне event loop, сериализуя конкурентные записи."""
-
-        offer_tuple = tuple(offers)
-        return await asyncio.to_thread(
-            self.ingest_offers_with_report,
-            offer_tuple,
-        )
-
-    async def ingest_offers_with_report_async(
-        self,
-        offers: Iterable[ProductOffer],
-    ) -> CatalogIngestReport:
-        """Сохраняет каталог вне event loop, сериализуя конкурентные записи."""
-
-        offer_tuple = tuple(offers)
-        return await asyncio.to_thread(
-            self.ingest_offers_with_report,
-            offer_tuple,
-        )
-
     @synchronized
     def ingest_external_items_with_report(
         self,

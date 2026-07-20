@@ -1,5 +1,6 @@
 import math
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,7 @@ class PriceHistoryRepository:
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute("PRAGMA synchronous = NORMAL")
             connection.executescript(
@@ -87,7 +88,7 @@ class PriceHistoryRepository:
 
         timestamp = observed_at or self._timestamp()
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.executemany(
                 """
                 INSERT INTO price_observations (
@@ -116,7 +117,7 @@ class PriceHistoryRepository:
         limit: int = 10,
     ) -> list[PricePoint]:
         safe_limit = min(max(int(limit), 1), 100)
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT
@@ -163,7 +164,7 @@ class PriceHistoryRepository:
         if not math.isfinite(price) or price < 0:
             raise ValueError("Alert price must be a finite non-negative number")
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 """
@@ -210,7 +211,7 @@ class PriceHistoryRepository:
             return True
 
     def active_alerts(self) -> list[PriceAlert]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT chat_id, product_key, title, query,
@@ -228,7 +229,7 @@ class PriceHistoryRepository:
         alert: PriceAlert,
         notified_price: float | None = None,
     ) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             if notified_price is None:
                 connection.execute(
                     """
@@ -256,6 +257,18 @@ class PriceHistoryRepository:
                         alert.product_key,
                     ),
                 )
+
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
