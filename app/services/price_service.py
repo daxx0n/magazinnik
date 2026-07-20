@@ -27,6 +27,7 @@ from app.sources.twenty_one_vek import (
     TwentyOneVekSource,
 )
 from app.sources.zeon import ZeonSource
+from app.services.catalog_service import CatalogService
 from app.services.product_variants import (
     display_color,
     extract_color,
@@ -51,7 +52,10 @@ class PriceService:
     _source_search_cache_size = 256
     _candidate_cache_size = 20_000
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        catalog_service: CatalogService | None = None,
+    ) -> None:
         self._onliner_candidates: OrderedDict[
             str,
             ProductCandidate,
@@ -76,6 +80,7 @@ class PriceService:
         self._electrosila_source = ElectrosilaSource()
 
         self._zeon_source = ZeonSource()
+        self._catalog_service = catalog_service or CatalogService()
 
         self._source_search_cache: OrderedDict[
             tuple[str, str, int],
@@ -467,6 +472,7 @@ class PriceService:
                 )
             )
 
+        self._ingest_catalog_offers(combined_offers)
         offers = self._prepare_aggregate_offers(
             offers=combined_offers,
         )
@@ -484,6 +490,33 @@ class PriceService:
                 "%d.%m.%Y %H:%M:%S"
             ),
             product_key=product_key,
+        )
+
+    def _ingest_catalog_offers(
+        self,
+        offers: Iterable[ProductOffer],
+    ) -> None:
+        """Обновляет мастер-каталог, не влияя на основной поиск."""
+
+        try:
+            report = (
+                self._catalog_service
+                .ingest_offers_with_report(offers)
+            )
+        except Exception:
+            logger.exception(
+                "Master catalog shadow ingest failed"
+            )
+            return
+
+        logger.info(
+            "Master catalog shadow ingest: total=%d "
+            "created=%d merged=%d updated=%d products=%d",
+            report.total_offers,
+            report.created_products,
+            report.merged_offers,
+            report.updated_offers,
+            len(report.product_keys),
         )
 
     @staticmethod
