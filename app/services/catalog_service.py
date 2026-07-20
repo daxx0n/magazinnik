@@ -2,12 +2,15 @@ import logging
 import os
 from collections.abc import Iterable
 from dataclasses import replace
+from datetime import datetime, timedelta
 
 from app.models.catalog import (
     CatalogIngestReport,
+    CatalogSnapshotMetrics,
     CatalogUpsertAction,
     CatalogUpsertResult,
     MasterCatalogProduct,
+    MatchReview,
 )
 from app.models.catalog_metrics import CatalogMetrics
 from app.models.offer import ProductOffer
@@ -110,6 +113,23 @@ class CatalogService:
             ),
         )
         return product
+
+    def snapshot_metrics(
+        self,
+        now: datetime | None = None,
+        stale_after: timedelta = timedelta(hours=24),
+    ) -> CatalogSnapshotMetrics:
+        """Возвращает метрики текущего сохранённого состояния каталога."""
+
+        return self._catalog.metrics(
+            now=now,
+            stale_after=stale_after,
+        )
+
+    def pending_reviews(self, limit: int = 20) -> tuple[MatchReview, ...]:
+        """Возвращает спорные пары, сохранённые вместе с офферами."""
+
+        return self._catalog.pending_reviews(limit=limit)
 
     def save(self) -> None:
         """Принудительно сохраняет текущий снимок каталога."""
