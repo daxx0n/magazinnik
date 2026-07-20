@@ -25,6 +25,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--source", dest="default_source")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--snapshot",
+        action="store_true",
+        help=(
+            "Treat the feed as a complete snapshot of one source and "
+            "deactivate offers missing from the file."
+        ),
+    )
     parser.add_argument("--allow-partial", action="store_true")
     return parser
 
@@ -32,10 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     load_dotenv()
     args = build_parser().parse_args()
+    if args.snapshot and args.allow_partial:
+        raise SystemExit("--snapshot cannot be combined with --allow-partial")
+
     report = CatalogFeedImporter(CatalogService()).import_file(
         args.path,
         dry_run=args.dry_run,
         allow_partial=args.allow_partial,
+        snapshot=args.snapshot,
         default_source=args.default_source,
         format_hint=args.format,
     )
