@@ -55,6 +55,11 @@ class ExternalCatalogItem:
     currency: str | None = None
     available: bool = True
     identity: ProductIdentity | None = None
+    match_level: MatchLevel | None = None
+    match_score: float | None = None
+    match_reason: str | None = None
+    match_conflicts: tuple[str, ...] = ()
+    match_candidate_key: str | None = None
     updated_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -87,3 +92,52 @@ class CatalogIngestReport:
     merged_offers: int
     updated_offers: int
     product_keys: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MatchReview:
+    """Спорное совпадение, требующее ручной проверки."""
+
+    product_key: str
+    product_title: str
+    candidate_product_key: str
+    candidate_product_title: str
+    source: str
+    external_id: str
+    incoming_title: str
+    score: float
+    reason: str
+    conflicts: tuple[str, ...] = ()
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogMetrics:
+    """Снимок качества, дедупликации и свежести мастер-каталога."""
+
+    product_count: int
+    offer_count: int
+    merged_offer_count: int
+    duplicate_rate: float
+    single_source_products: int
+    multi_source_products: int
+    exact_matches: int
+    probable_matches: int
+    review_matches: int
+    rejected_matches: int
+    fresh_offers: int
+    stale_offers: int
+    unavailable_offers: int
+    source_offer_counts: tuple[tuple[str, int], ...] = ()
+
+    @property
+    def automatic_matches(self) -> int:
+        return self.exact_matches + self.probable_matches
+
+    @property
+    def exact_share(self) -> float:
+        if self.automatic_matches == 0:
+            return 0.0
+        return self.exact_matches / self.automatic_matches
