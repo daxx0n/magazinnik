@@ -129,21 +129,27 @@ def significant_model_numbers(value: str) -> set[str]:
         r"playstation \1",
         normalized,
     )
-    memory = extract_memory(value)
-    memory_amounts = (
-        set(re.findall(r"\d+", memory))
-        if memory is not None
-        else set()
+    normalized = re.sub(
+        r"(?<!\d)\d{1,4}\s*"
+        r"(?:gb|tb|mb|гб|тб|мб)?\s*/\s*"
+        r"\d{1,4}\s*(?:gb|tb|mb|гб|тб|мб)?(?!\w)",
+        " ",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"\b\d+\s*(?:gb|tb|mb|гб|тб|мб)\b",
+        " ",
+        normalized,
+        flags=re.IGNORECASE,
     )
 
-    return {
-        number
-        for number in re.findall(
+    return set(
+        re.findall(
             r"(?<![a-zа-я0-9])\d{1,2}(?![a-zа-я0-9])",
             normalized,
         )
-        if number not in memory_amounts
-    }
+    )
 
 
 def generation_mismatch(

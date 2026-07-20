@@ -274,9 +274,13 @@ class PriceService:
 
             canonical_title = onliner_offers[0].title
 
-        # После выбора карточки именно полное название варианта,
-        # а не исходный широкий запрос, является эталоном мэтчинга.
-        requested_query = canonical_title
+        original_query = self._onliner_queries.get(
+            product_key,
+            canonical_title,
+        )
+        # После выбора карточки полное название варианта используется
+        # только как эталон мэтчинга. Исходный запрос сохраняется для UX.
+        matching_reference = canonical_title
         cross_source_query = (
             self._build_cross_source_query(
                 canonical_title
@@ -294,7 +298,7 @@ class PriceService:
                 self._search_five_element_by_query(
                     query=cross_source_query,
                     canonical_title=canonical_title,
-                    requested_title=requested_query,
+                    requested_title=matching_reference,
                 )
             ),
             self._timed_result(
@@ -436,7 +440,7 @@ class PriceService:
                             canonical_title,
                             offer.title,
                             requested_title=(
-                                requested_query
+                                matching_reference
                             ),
                         )
                     )
@@ -498,7 +502,7 @@ class PriceService:
             offers=offers,
             source_statuses=source_statuses,
             match_decisions=match_decisions,
-            query=requested_query,
+            query=original_query,
             product_title=canonical_title,
             duration_seconds=(
                 time.monotonic() - search_started
