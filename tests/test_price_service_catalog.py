@@ -89,6 +89,16 @@ class PriceServiceCatalogShadowTest(unittest.IsolatedAsyncioTestCase):
         return service
 
     @staticmethod
+    def report(*, product_keys: tuple[str, ...], created: int) -> Mock:
+        return Mock(
+            total_offers=4,
+            created_products=created,
+            merged_offers=4 - created,
+            updated_offers=0,
+            product_keys=product_keys,
+        )
+
+    @staticmethod
     def master_product() -> MasterCatalogProduct:
         return MasterCatalogProduct(
             key="product-1",
@@ -101,20 +111,19 @@ class PriceServiceCatalogShadowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_ingests_all_accepted_offers_only(self) -> None:
         catalog_service = Mock()
-        catalog_service.ingest_offers_with_report.return_value = Mock(
-            total_offers=4,
-            created_products=1,
-            merged_offers=3,
-            updated_offers=0,
-            product_keys=("product-1",),
+        catalog_service.ingest_offers_with_report_async = AsyncMock(
+            return_value=self.report(
+                product_keys=("product-1",),
+                created=1,
+            )
         )
         service = self.build_service(catalog_service)
 
         result = await service.search_all_sources_by_onliner_key("bosch")
 
-        catalog_service.ingest_offers_with_report.assert_called_once()
+        catalog_service.ingest_offers_with_report_async.assert_awaited_once()
         ingested = list(
-            catalog_service.ingest_offers_with_report.call_args.args[0]
+            catalog_service.ingest_offers_with_report_async.await_args.args[0]
         )
         self.assertEqual(len(ingested), 4)
         self.assertEqual(
@@ -139,12 +148,11 @@ class PriceServiceCatalogShadowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_enables_master_presentation_for_one_product(self) -> None:
         catalog_service = Mock()
-        catalog_service.ingest_offers_with_report.return_value = Mock(
-            total_offers=4,
-            created_products=1,
-            merged_offers=3,
-            updated_offers=0,
-            product_keys=("product-1",),
+        catalog_service.ingest_offers_with_report_async = AsyncMock(
+            return_value=self.report(
+                product_keys=("product-1",),
+                created=1,
+            )
         )
         catalog_service.get_product.return_value = self.master_product()
         service = self.build_service(
@@ -161,12 +169,11 @@ class PriceServiceCatalogShadowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_keeps_legacy_view_for_ambiguous_catalog_result(self) -> None:
         catalog_service = Mock()
-        catalog_service.ingest_offers_with_report.return_value = Mock(
-            total_offers=4,
-            created_products=2,
-            merged_offers=2,
-            updated_offers=0,
-            product_keys=("product-1", "product-2"),
+        catalog_service.ingest_offers_with_report_async = AsyncMock(
+            return_value=self.report(
+                product_keys=("product-1", "product-2"),
+                created=2,
+            )
         )
         service = self.build_service(
             catalog_service,
@@ -181,8 +188,8 @@ class PriceServiceCatalogShadowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_catalog_failure_does_not_break_search(self) -> None:
         catalog_service = Mock()
-        catalog_service.ingest_offers_with_report.side_effect = RuntimeError(
-            "catalog unavailable"
+        catalog_service.ingest_offers_with_report_async = AsyncMock(
+            side_effect=RuntimeError("catalog unavailable")
         )
         service = self.build_service(
             catalog_service,
@@ -208,12 +215,11 @@ class PriceServiceCatalogShadowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_catalog_read_failure_keeps_legacy_view(self) -> None:
         catalog_service = Mock()
-        catalog_service.ingest_offers_with_report.return_value = Mock(
-            total_offers=4,
-            created_products=1,
-            merged_offers=3,
-            updated_offers=0,
-            product_keys=("product-1",),
+        catalog_service.ingest_offers_with_report_async = AsyncMock(
+            return_value=self.report(
+                product_keys=("product-1",),
+                created=1,
+            )
         )
         catalog_service.get_product.side_effect = RuntimeError("read failed")
         service = self.build_service(
