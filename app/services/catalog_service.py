@@ -80,7 +80,7 @@ class CatalogService:
     def _persist(self) -> None:
         if self._storage is None:
             return
-        self._storage.save(list(self._catalog.products))
+        self._storage.save(self._catalog.products)
 
     @staticmethod
     def _build_report(
