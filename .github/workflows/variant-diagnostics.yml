@@ -1,0 +1,32 @@
+name: variant-diagnostics
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Run suite
+        shell: bash
+        run: |
+          set +e
+          python -m unittest discover -s tests > variant-test-output.txt 2>&1
+          status=$?
+          cat variant-test-output.txt
+          exit $status
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: variant-test-output
+          path: variant-test-output.txt
