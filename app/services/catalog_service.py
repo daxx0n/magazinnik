@@ -15,6 +15,7 @@ from app.models.catalog import (
 from app.models.catalog_metrics import CatalogMetrics
 from app.models.offer import ProductOffer
 from app.services.catalog_adapter import CatalogOfferAdapter
+from app.services.catalog_search import search_catalog
 from app.services.catalog_storage import JsonCatalogStorage
 from app.services.master_catalog import MasterCatalog
 from app.services.sqlite_catalog_storage import SqliteCatalogStorage
@@ -108,7 +109,9 @@ class CatalogService:
         return self._last_report
 
     def search(self, query: str) -> list[MasterCatalogProduct]:
-        return self._catalog.search(query)
+        """Ищет по названиям, нормализованной модели, MPN и EAN."""
+
+        return search_catalog(self._catalog.products, query)
 
     def get_product(
         self,
