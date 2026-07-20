@@ -92,6 +92,7 @@ class CatalogFirstPriceService(PriceService):
     async def search_all_sources_by_onliner_key(
         self,
         product_key: str,
+        original_query: str | None = None,
     ) -> ComparisonResult:
         """Открывает мастер-карточку или обновляет её через live-search."""
 
@@ -99,7 +100,10 @@ class CatalogFirstPriceService(PriceService):
             not self._catalog_search_enabled
             or not product_key.startswith(self._catalog_key_prefix)
         ):
-            return await super().search_all_sources_by_onliner_key(product_key)
+            return await super().search_all_sources_by_onliner_key(
+                product_key,
+                original_query=original_query,
+            )
 
         started = time.monotonic()
         master_key = product_key.removeprefix(self._catalog_key_prefix)
@@ -107,7 +111,10 @@ class CatalogFirstPriceService(PriceService):
         if product is None:
             raise ProductNotFoundError("Мастер-карточка больше не существует.")
 
-        original_query = self._catalog_queries.get(product_key, product.title)
+        original_query = original_query or self._catalog_queries.get(
+            product_key,
+            product.title,
+        )
         fresh_offers = self._catalog_offers(product, fresh_only=True)
         if fresh_offers:
             logger.info(
@@ -138,7 +145,8 @@ class CatalogFirstPriceService(PriceService):
                     live_candidate.key,
                 )
                 result = await super().search_all_sources_by_onliner_key(
-                    live_candidate.key
+                    live_candidate.key,
+                    original_query=original_query,
                 )
                 return replace(
                     result,
