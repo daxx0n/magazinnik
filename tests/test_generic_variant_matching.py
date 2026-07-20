@@ -161,7 +161,11 @@ class GenericVariantMatchingTest(unittest.TestCase):
             ),
             (
                 "Samsung Galaxy S25 12GB/256GB Navy",
-                "Смартфон Samsung Galaxy S25 12/256GB синий",
+                "Смартфон Samsung Galaxy S25 12/256GB темно-синий",
+            ),
+            (
+                "Apple iPhone 15 Pro 256GB Natural Titanium",
+                "Смартфон Apple iPhone 15 Pro 256 ГБ природный титан",
             ),
         ]
         for canonical, candidate_title in cases:
