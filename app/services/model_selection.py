@@ -79,7 +79,7 @@ _COLOR_ALIAS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 
 def requested_color_key(value: str | None) -> str | None:
-    """Определяет цвет, явно указанный пользователем или карточкой."""
+    """Определяет нормализованный цвет карточки или пользовательского ввода."""
 
     if not value:
         return None
@@ -155,18 +155,7 @@ def generation_mismatch(
 def model_variant_title(title: str) -> str:
     """Возвращает модель без памяти и цветового оформления."""
 
-    result = title
-    trailing = re.search(r"\s*\(([^()]*)\)\s*$", result)
-
-    if (
-        trailing is not None
-        and requested_color_key(trailing.group(1)) is not None
-    ):
-        result = result[:trailing.start()].strip()
-    elif requested_color_key(result) is not None:
-        for _, pattern in _COLOR_ALIAS_PATTERNS:
-            result = pattern.sub(" ", result)
-
+    result = _strip_color_suffix(title)
     normalized = base_product_title(result)
     return normalized or title
 
@@ -199,7 +188,7 @@ def group_model_variants(
 
 
 def selected_color_label(title: str) -> str | None:
-    """Возвращает понятную подпись цвета, включая маркетинговые алиасы."""
+    """Возвращает понятную подпись цвета для любой категории товара."""
 
     known_label = display_color(title)
     if known_label is not None:
@@ -210,14 +199,16 @@ def selected_color_label(title: str) -> str | None:
         trailing is not None
         and requested_color_key(trailing.group(1)) is not None
     ):
-        value = " ".join(trailing.group(1).split())
-        return value[:1].upper() + value[1:]
+        return _display_suffix(trailing.group(1))
+
+    suffix = _color_suffix(title)
+    if suffix is not None:
+        return _display_suffix(suffix)
 
     for _, pattern in _COLOR_ALIAS_PATTERNS:
         match = pattern.search(title)
         if match is not None:
-            value = " ".join(match.group(0).split())
-            return value[:1].upper() + value[1:]
+            return _display_suffix(match.group(0))
     return None
 
 
@@ -239,20 +230,49 @@ def collapse_color_variants(
 
 
 def _color_agnostic_title(title: str) -> str:
-    result = title
-    explicit_color = extract_color(result)
-    trailing = re.search(r"\(([^()]*)\)\s*$", result)
-    if (
-        explicit_color is not None
-        or (
-            trailing is not None
-            and requested_color_key(trailing.group(1)) is not None
-        )
-    ):
-        result = re.sub(r"\s*\([^()]*\)\s*$", "", result)
-
-    for _, pattern in _COLOR_ALIAS_PATTERNS:
-        result = pattern.sub(" ", result)
-
+    result = _strip_color_suffix(title)
     result = re.sub(r"[^a-zа-я0-9]+", " ", result.casefold())
     return " ".join(result.split())
+
+
+def _strip_color_suffix(title: str) -> str:
+    """Удаляет только цветовой суффикс, не трогая слова внутри модели."""
+
+    result = " ".join(title.split()).strip()
+    trailing = re.search(r"\s*\(([^()]*)\)\s*$", result)
+    if (
+        trailing is not None
+        and requested_color_key(trailing.group(1)) is not None
+    ):
+        return result[:trailing.start()].strip(" -/,")
+
+    suffix = _color_suffix(result)
+    if suffix is None:
+        return result
+
+    prefix = result[: len(result) - len(suffix)].strip(" -/,")
+    return prefix or result
+
+
+def _color_suffix(title: str) -> str | None:
+    """Находит цвет в последних словах через общий словарь product_variants."""
+
+    full_color = requested_color_key(title)
+    if full_color is None:
+        return None
+
+    tokens = title.split()
+    max_width = min(4, len(tokens) - 1)
+    for width in range(1, max_width + 1):
+        raw_suffix = " ".join(tokens[-width:])
+        suffix = raw_suffix.strip("()[]{}.,;:-_/ ")
+        if not suffix or any(character.isdigit() for character in suffix):
+            continue
+        if requested_color_key(suffix) == full_color:
+            return raw_suffix
+    return None
+
+
+def _display_suffix(value: str) -> str:
+    normalized = " ".join(value.strip("()[]{}.,;:-_/ ").split())
+    return normalized[:1].upper() + normalized[1:]
