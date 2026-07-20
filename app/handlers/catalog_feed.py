@@ -130,6 +130,24 @@ async def handle_catalog_feed_document(
     )
 
 
+@router.message(Command("catalog_feed"))
+async def handle_catalog_feed_help(message: Message) -> None:
+    """Объясняет безопасный процесс загрузки фида."""
+
+    if not _is_allowed(message):
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    await message.answer(
+        "Прикрепи файл .json, .jsonl или .ndjson и добавь подпись:\n\n"
+        "/catalog_feed\n\n"
+        "Если в строках нет поля source, укажи общий источник:\n\n"
+        "/catalog_feed Supplier feed\n\n"
+        "Сначала бот выполнит dry-run. Каталог изменится только после "
+        "одноразовой команды подтверждения."
+    )
+
+
 @router.message(Command("catalog_feed_confirm"))
 async def handle_catalog_feed_confirm(message: Message) -> None:
     """Подтверждает одноразовый импорт проверенного фида."""
