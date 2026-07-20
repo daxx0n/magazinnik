@@ -30,18 +30,12 @@ from app.services.model_selection import (
     requested_color_key,
     selected_color_label,
 )
-from app.services.model_selection import (
-    group_model_variants,
-    requested_color_key,
-    selected_color_label,
-)
 from app.services.price_service import PriceService
 from app.services.price_history import PriceHistoryRepository
 from app.services.product_variants import (
     ProductVariantGroup,
     display_color,
     display_product_title,
-    extract_memory,
     extract_memory,
     group_by_memory,
 )
@@ -1318,8 +1312,15 @@ async def show_color_selection(
 ) -> None:
     """Показывает цвет; память уточняется в подписи варианта."""
 
+    colored_products = [
+        product
+        for product in products
+        if requested_color_key(product.title) is not None
+    ]
+    selectable_products = colored_products or products
+
     choices: dict[tuple[str, str], ProductCandidate] = {}
-    for product in products:
+    for product in selectable_products:
         color_key = requested_color_key(product.title) or "unknown"
         memory = extract_memory(product.title) or "Без выбора памяти"
         choices.setdefault((color_key, memory), product)
@@ -1370,7 +1371,9 @@ async def show_color_selection(
     )
 
     await message.edit_text(
-        f"📱 {group.title}\n\n"
+        f"📱 {group.title}
+
+"
         "Выбери цвет. Если у цвета несколько вариантов памяти, "
         "она указана в кнопке:",
         reply_markup=builder.as_markup(),
