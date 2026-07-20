@@ -30,12 +30,18 @@ from app.services.model_selection import (
     requested_color_key,
     selected_color_label,
 )
+from app.services.model_selection import (
+    group_model_variants,
+    requested_color_key,
+    selected_color_label,
+)
 from app.services.price_service import PriceService
 from app.services.price_history import PriceHistoryRepository
 from app.services.product_variants import (
     ProductVariantGroup,
     display_color,
     display_product_title,
+    extract_memory,
     extract_memory,
     group_by_memory,
 )
