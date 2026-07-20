@@ -3,7 +3,7 @@ import os
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.models.catalog import (
     CatalogIngestReport,
@@ -113,16 +113,56 @@ class CatalogService:
     def ingest_external_items_with_report(
         self,
         items: Iterable[ExternalCatalogItem],
+        *,
+        deactivate_missing_source: str | None = None,
     ) -> CatalogIngestReport:
-        """Транзакционно импортирует структурированные внешние товары."""
+        """Транзакционно импортирует внешний batch или полный snapshot."""
+
+        item_tuple = tuple(items)
+        snapshot_source = (
+            deactivate_missing_source.strip()
+            if deactivate_missing_source is not None
+            else None
+        )
+        if snapshot_source == "":
+            raise ValueError("Snapshot source must not be empty")
+        if snapshot_source is not None and not item_tuple:
+            raise ValueError("Snapshot feed must contain at least one item")
+
+        normalized_snapshot_source = (
+            snapshot_source.casefold()
+            if snapshot_source is not None
+            else None
+        )
+        if normalized_snapshot_source is not None and any(
+            item.source.strip().casefold() != normalized_snapshot_source
+            for item in item_tuple
+        ):
+            raise ValueError(
+                "Snapshot feed must contain exactly one source"
+            )
 
         snapshot = deepcopy(self._catalog.products)
         try:
             results = tuple(
                 self._catalog.upsert_with_result(item)
-                for item in items
+                for item in item_tuple
             )
             report = self._build_report(results)
+            if snapshot_source is not None:
+                seen_external_ids = {
+                    item.external_id.strip()
+                    for item in item_tuple
+                }
+                deactivated = self._deactivate_missing_offers(
+                    source=snapshot_source,
+                    seen_external_ids=seen_external_ids,
+                    updated_at=datetime.now(timezone.utc),
+                )
+                report = replace(
+                    report,
+                    deactivated_offers=deactivated,
+                )
             self._persist()
         except Exception:
             self._catalog.restore(snapshot)
@@ -215,6 +255,31 @@ class CatalogService:
     def _ingest(self, offer: ProductOffer) -> CatalogUpsertResult:
         item = self._adapter.from_offer(offer)
         return self._catalog.upsert_with_result(item)
+
+    def _deactivate_missing_offers(
+        self,
+        *,
+        source: str,
+        seen_external_ids: set[str],
+        updated_at: datetime,
+    ) -> int:
+        normalized_source = source.strip().casefold()
+        deactivated = 0
+        for product in self._catalog.products:
+            for index, offer in enumerate(product.offers):
+                if (
+                    offer.source.strip().casefold() != normalized_source
+                    or offer.external_id.strip() in seen_external_ids
+                    or not offer.available
+                ):
+                    continue
+                product.offers[index] = replace(
+                    offer,
+                    available=False,
+                    updated_at=updated_at,
+                )
+                deactivated += 1
+        return deactivated
 
     def _persist(self) -> None:
         if self._storage is None:
