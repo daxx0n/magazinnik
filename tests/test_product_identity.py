@@ -42,6 +42,7 @@ class ProductIdentityBuilderTest(unittest.TestCase):
             "Sony PlayStation 5 Slim CFI-2016A"
         )
 
+        self.assertEqual(identity.model, "playstation 5 slim")
         self.assertEqual(identity.revision, "cfi-2016a")
 
     def test_extracts_named_revision(self) -> None:
