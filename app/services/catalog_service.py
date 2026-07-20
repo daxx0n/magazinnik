@@ -75,6 +75,21 @@ class CatalogService:
     def search(self, query: str) -> list[MasterCatalogProduct]:
         return self._catalog.search(query)
 
+    def get_product(
+        self,
+        product_key: str,
+    ) -> MasterCatalogProduct | None:
+        """Возвращает мастер-карточку по стабильному ключу."""
+
+        return next(
+            (
+                product
+                for product in self._catalog.products
+                if product.key == product_key
+            ),
+            None,
+        )
+
     def save(self) -> None:
         """Принудительно сохраняет текущий снимок каталога."""
 
