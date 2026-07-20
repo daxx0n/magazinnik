@@ -18,7 +18,7 @@ class MatchingFuzzTest(unittest.TestCase):
             ),
             (
                 "Samsung Galaxy S25 12GB/256GB Navy",
-                "Телефон SAMSUNG Galaxy S25 12/256GB синий",
+                "Телефон SAMSUNG Galaxy S25 12/256GB темно-синий",
             ),
             (
                 "Apple iPhone 15 Pro 256GB Natural Titanium",
