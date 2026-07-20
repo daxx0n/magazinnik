@@ -2,12 +2,15 @@ import logging
 import os
 from collections.abc import Iterable
 from dataclasses import replace
+from datetime import datetime, timedelta
 
 from app.models.catalog import (
     CatalogIngestReport,
+    CatalogSnapshotMetrics,
     CatalogUpsertAction,
     CatalogUpsertResult,
     MasterCatalogProduct,
+    MatchReview,
 )
 from app.models.catalog_metrics import CatalogMetrics
 from app.models.offer import ProductOffer
@@ -109,6 +112,51 @@ class CatalogService:
                 self._metrics.lookup_misses + int(product is None)
             ),
         )
+        return product
+
+    def snapshot_metrics(
+        self,
+        now: datetime | None = None,
+        stale_after: timedelta = timedelta(hours=24),
+    ) -> CatalogSnapshotMetrics:
+        """Возвращает метрики текущего сохранённого состояния каталога."""
+
+        return self._catalog.metrics(
+            now=now,
+            stale_after=stale_after,
+        )
+
+    def pending_reviews(self, limit: int = 20) -> tuple[MatchReview, ...]:
+        """Возвращает спорные пары, сохранённые вместе с офферами."""
+
+        return self._catalog.pending_reviews(limit=limit)
+
+    def accept_review(
+        self,
+        product_key: str,
+        candidate_product_key: str,
+    ) -> MasterCatalogProduct:
+        """Подтверждает объединение спорной мастер-карточки."""
+
+        product = self._catalog.accept_review(
+            product_key,
+            candidate_product_key,
+        )
+        self._persist()
+        return product
+
+    def reject_review(
+        self,
+        product_key: str,
+        candidate_product_key: str,
+    ) -> MasterCatalogProduct:
+        """Подтверждает, что спорные карточки являются разными."""
+
+        product = self._catalog.reject_review(
+            product_key,
+            candidate_product_key,
+        )
+        self._persist()
         return product
 
     def save(self) -> None:

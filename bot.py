@@ -5,7 +5,7 @@ import logging
 from aiogram import Bot, Dispatcher
 
 from app.config import load_config
-from app.handlers import common, search
+from app.handlers import catalog, common, search
 
 
 async def main() -> None:
@@ -27,6 +27,7 @@ async def main() -> None:
     dispatcher = Dispatcher()
 
     dispatcher.include_router(common.router)
+    dispatcher.include_router(catalog.router)
     dispatcher.include_router(search.router)
     search.initialize_price_history(config.price_database_path)
     alert_task = asyncio.create_task(

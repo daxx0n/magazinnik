@@ -8,6 +8,7 @@ from typing import Any
 from app.models.catalog import (
     ExternalCatalogItem,
     MasterCatalogProduct,
+    MatchLevel,
     ProductIdentity,
 )
 
@@ -70,6 +71,15 @@ class JsonCatalogStorage:
             raw_identity = offer_payload.get("identity")
             if raw_identity is not None:
                 offer_payload["identity"] = ProductIdentity(**raw_identity)
+
+            raw_match_level = offer_payload.get("match_level")
+            if raw_match_level:
+                offer_payload["match_level"] = MatchLevel(raw_match_level)
+
+            raw_conflicts = offer_payload.get("match_conflicts")
+            if raw_conflicts is not None:
+                offer_payload["match_conflicts"] = tuple(raw_conflicts)
+
             raw_updated_at = offer_payload.get("updated_at")
             if raw_updated_at:
                 offer_payload["updated_at"] = datetime.fromisoformat(
