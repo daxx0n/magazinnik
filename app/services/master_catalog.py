@@ -187,6 +187,57 @@ class MasterCatalog:
         reviews.sort(key=lambda review: review.created_at, reverse=True)
         return tuple(reviews[: max(limit, 0)])
 
+    def accept_review(
+        self,
+        product_key: str,
+        candidate_product_key: str,
+    ) -> MasterCatalogProduct:
+        """Объединяет спорную карточку с подтверждённым кандидатом."""
+
+        if product_key == candidate_product_key:
+            raise ValueError("Review product and candidate must differ")
+
+        product = self._require_product(product_key)
+        candidate = self._require_product(candidate_product_key)
+        self._require_review_pair(product, candidate_product_key)
+
+        for offer in tuple(product.offers):
+            approved_offer = replace(
+                offer,
+                match_level=MatchLevel.PROBABLE,
+                match_reason="manual_approval",
+                match_candidate_key=candidate.key,
+            )
+            self._replace_offer(candidate, approved_offer)
+            self._external_index[
+                self._external_key(approved_offer)
+            ] = candidate.key
+
+        self._products.pop(product.key)
+        return candidate
+
+    def reject_review(
+        self,
+        product_key: str,
+        candidate_product_key: str,
+    ) -> MasterCatalogProduct:
+        """Фиксирует, что спорные карточки являются разными товарами."""
+
+        product = self._require_product(product_key)
+        self._require_product(candidate_product_key)
+        review_indexes = self._require_review_pair(
+            product,
+            candidate_product_key,
+        )
+
+        for index in review_indexes:
+            product.offers[index] = replace(
+                product.offers[index],
+                match_level=MatchLevel.REJECTED,
+                match_reason="manual_rejection",
+            )
+        return product
+
     def metrics(
         self,
         now: datetime | None = None,
@@ -289,6 +340,32 @@ class MasterCatalog:
         )
         self._products[product.key] = product
         return product
+
+    def _require_product(self, product_key: str) -> MasterCatalogProduct:
+        product = self._products.get(product_key)
+        if product is None:
+            raise ValueError(f"Unknown catalog product: {product_key}")
+        return product
+
+    @staticmethod
+    def _require_review_pair(
+        product: MasterCatalogProduct,
+        candidate_product_key: str,
+    ) -> tuple[int, ...]:
+        review_indexes = tuple(
+            index
+            for index, offer in enumerate(product.offers)
+            if (
+                offer.match_level == MatchLevel.REVIEW
+                and offer.match_candidate_key == candidate_product_key
+            )
+        )
+        if not review_indexes:
+            raise ValueError(
+                "Pending review pair was not found: "
+                f"{product.key} -> {candidate_product_key}"
+            )
+        return review_indexes
 
     @staticmethod
     def _with_match_metadata(
