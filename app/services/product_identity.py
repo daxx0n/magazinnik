@@ -33,7 +33,7 @@ class ProductIdentityBuilder:
     _revision_patterns = (
         re.compile(r"\b(?:rev(?:ision)?|рев(?:изия)?)\s*[.:#-]?\s*([a-z0-9.-]+)\b", re.I),
         re.compile(r"\b(cfi-\d{4}[a-z]?)\b", re.I),
-        re.compile(r"\b(chassis|шасси)\s*([a-z0-9.-]+)\b", re.I),
+        re.compile(r"\b(?:chassis|шасси)\s*([a-z0-9.-]+)\b", re.I),
     )
 
     def build(
@@ -48,6 +48,7 @@ class ProductIdentityBuilder:
     ) -> ProductIdentity:
         """Возвращает признаки, пригодные для межмагазинного сопоставления."""
 
+        detected_revision = self._normalize_text(revision) or self._extract_revision(title)
         cleaned_title = self._clean_title(title)
         detected_brand = self._normalize_text(brand) or self._extract_brand(cleaned_title)
         detected_model = self._normalize_text(model) or self._extract_model(
@@ -60,7 +61,7 @@ class ProductIdentityBuilder:
             model=detected_model,
             memory=extract_memory(title),
             color=extract_color_key(title),
-            revision=self._normalize_text(revision) or self._extract_revision(title),
+            revision=detected_revision,
             ean=self._normalize_identifier(ean),
             mpn=self._normalize_identifier(mpn),
         )
@@ -68,6 +69,8 @@ class ProductIdentityBuilder:
     @classmethod
     def _clean_title(cls, title: str) -> str:
         value = base_product_title(title)
+        for pattern in cls._revision_patterns:
+            value = pattern.sub(" ", value)
         value = value.replace("ё", "е")
         value = re.sub(r"[|,;]+", " ", value)
         return " ".join(value.split()).strip()
@@ -88,12 +91,7 @@ class ProductIdentityBuilder:
         if brand and tokens and cls._normalize_text(tokens[0]) == brand:
             tokens.pop(0)
 
-        model_tokens = [
-            token
-            for token in tokens
-            if not cls._looks_like_revision_label(token)
-        ]
-        return cls._normalize_text(" ".join(model_tokens))
+        return cls._normalize_text(" ".join(tokens))
 
     @classmethod
     def _extract_revision(cls, title: str) -> str | None:
@@ -104,10 +102,6 @@ class ProductIdentityBuilder:
             groups = [group for group in match.groups() if group]
             return cls._normalize_text(groups[-1] if groups else match.group(0))
         return None
-
-    @staticmethod
-    def _looks_like_revision_label(value: str) -> bool:
-        return value.casefold() in {"rev", "revision", "рев", "ревизия", "chassis", "шасси"}
 
     @staticmethod
     def _normalize_text(value: str | None) -> str | None:
