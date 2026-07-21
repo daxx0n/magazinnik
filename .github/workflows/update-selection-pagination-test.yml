@@ -6,26 +6,27 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   update:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python tools/update_pagination_test.py
-      - name: Commit update
+      - name: Run focused test
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/test_source_statuses.py
-          git commit -m "Update pagination test for memory selection"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-      - run: python -m unittest tests.test_source_statuses.SourceStatusesTest.test_paginates_product_variants
+          set +e
+          python -m unittest tests.test_source_statuses.SourceStatusesTest.test_paginates_product_variants > focused-output.txt 2>&1
+          status=$?
+          cat focused-output.txt
+          exit $status
+      - name: Upload focused output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: focused-pagination-output
+          path: focused-output.txt
