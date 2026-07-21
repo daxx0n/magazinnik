@@ -12,10 +12,18 @@ class ColorNormalizerTest(unittest.TestCase):
         self.assertFalse(colors_match("mint", "hazel"))
         self.assertFalse(colors_match("mint", "obsidian"))
 
+    def test_same_family_different_variant_is_not_match(self):
+        self.assertFalse(colors_match("green", "mint"))
+        self.assertFalse(colors_match("mint", "jade"))
+
     def test_brand_color_aliases(self):
         self.assertEqual(normalize_color("Obsidian").family, "black")
-        self.assertEqual(normalize_color("Natural Titanium").family, None)
+        self.assertEqual(normalize_color("Natural Titanium"), None)
         self.assertEqual(normalize_color("лунный камень").family, "gray")
+
+    def test_hazel_variants(self):
+        self.assertTrue(colors_match("лесной орех", "Hazel"))
+        self.assertFalse(colors_match("мятный зеленый", "Hazel"))
 
 
 if __name__ == "__main__":
