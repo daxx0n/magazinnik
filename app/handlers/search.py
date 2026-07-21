@@ -41,23 +41,9 @@ from app.services.search_sessions import (
     SearchSessionRegistry,
     SelectionQueryRegistry,
 )
-from app.services.search_input import SearchInputError, normalize_search_query
-from app.services.search_load import (
-    SearchBusyError,
-    SearchRequestCoordinator,
-)
-from app.services.search_sessions import (
-    SearchSessionRegistry,
-    SelectionQueryRegistry,
-)
-from app.services.search_input import SearchInputError, normalize_search_query
-from app.services.search_load import (
-    SearchBusyError,
-    SearchRequestCoordinator,
-)
-from app.services.search_sessions import (
-    SearchSessionRegistry,
-    SelectionQueryRegistry,
+from app.services.selection_flow import (
+    ordered_memory_groups,
+    ordered_variant_groups,
 )
 from app.services.product_variants import (
     ProductVariantGroup,
@@ -671,7 +657,7 @@ async def handle_product_page(
     except ValueError:
         return
 
-    groups = group_model_variants(products)
+    groups = ordered_variant_groups(products, group_model_variants)
     max_page = (len(groups) - 1) // PRODUCT_PAGE_SIZE
     page = min(max(page, 0), max_page)
 
@@ -829,7 +815,7 @@ async def handle_category_selection(
         owner_chat_id=message_chat_id(callback.message),
         owner_user_id=callback_user_id(callback),
     )
-    groups = group_model_variants(products)
+    groups = ordered_variant_groups(products, group_model_variants)
 
     await callback.message.edit_text(
         f"Категория: {category.title}\n\n"
@@ -875,28 +861,20 @@ async def handle_variant_group(
 
     try:
         group_index = int(raw_group_index)
-        group = group_model_variants(products)[
+        group = ordered_variant_groups(products, group_model_variants)[
             group_index
         ]
     except (ValueError, IndexError):
         return
 
-    user_id = callback_user_id(callback)
-    original_query = selection_query_registry.get(
-        chat_id=message_chat_id(callback.message),
-        user_id=user_id,
-        product_key=group.products[0].key,
-    )
-    await show_color_selection(
-        message=callback.message,
-        group=group,
-        products=group.products,
-        back_callback=(
-            f"olp:{search_id}:"
-            f"{group_index // PRODUCT_PAGE_SIZE}"
+    memory_groups = ordered_memory_groups(group.products)
+    await callback.message.edit_text(
+        f"📱 {group.title}\n\nВыбери память:",
+        reply_markup=build_memory_keyboard(
+            search_id=search_id,
+            group_index=group_index,
+            memory_groups=memory_groups,
         ),
-        original_query=original_query,
-        user_id=user_id,
     )
 
 
@@ -931,12 +909,10 @@ async def handle_memory_selection(
     try:
         group_index = int(raw_group_index)
         memory_index = int(raw_memory_index)
-        group = group_model_variants(products)[
+        group = ordered_variant_groups(products, group_model_variants)[
             group_index
         ]
-        memory_products = group_by_memory(
-            group.products
-        )[memory_index][1]
+        memory_products = ordered_memory_groups(group.products)[memory_index][1]
     except (ValueError, IndexError):
         return
 
@@ -950,12 +926,150 @@ async def handle_memory_selection(
         message=callback.message,
         group=group,
         products=memory_products,
-        back_callback=(
-            f"olg:{search_id}:{group_index}"
+        back_callback=f"olg:{search_id}:{group_index}",
+        any_callback=(
+            f"ola:{search_id}:{group_index}:{memory_index}"
         ),
         original_query=original_query,
         user_id=user_id,
     )
+
+
+
+@router.callback_query(F.data.startswith("ola:"))
+async def handle_any_color_selection(callback: CallbackQuery) -> None:
+    """Ищет минимальную цену среди всех цветов выбранной памяти."""
+
+    await callback.answer()
+    if callback.message is None:
+        return
+
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4:
+        return
+
+    _, search_id, raw_group_index, raw_memory_index = parts
+    products = authorized_product_search(callback, search_id)
+    if products is None:
+        await callback.message.edit_text(
+            "Результаты поиска устарели. Повтори запрос."
+        )
+        return
+
+    try:
+        group_index = int(raw_group_index)
+        memory_index = int(raw_memory_index)
+        group = ordered_variant_groups(
+            products,
+            group_model_variants,
+        )[group_index]
+        memory_products = ordered_memory_groups(
+            group.products
+        )[memory_index][1]
+    except (ValueError, IndexError):
+        return
+
+    user_id = callback_user_id(callback)
+    original_query = selection_query_registry.get(
+        chat_id=message_chat_id(callback.message),
+        user_id=user_id,
+        product_key=memory_products[0].key,
+    )
+    await load_any_color_comparison(
+        message=callback.message,
+        products=memory_products,
+        original_query=original_query,
+        user_id=user_id,
+    )
+
+
+async def load_any_color_comparison(
+    message: Message,
+    products: list[ProductCandidate],
+    original_query: str | None,
+    user_id: int | None,
+) -> None:
+    """Объединяет предложения всех цветов и сортирует по цене."""
+
+    await message.edit_text(
+        "🔎 Ищу минимальную цену среди всех цветов..."
+    )
+
+    async def load(product: ProductCandidate) -> ComparisonResult | None:
+        try:
+            return await price_service.search_all_sources_by_onliner_key(
+                product.key,
+                original_query=None,
+            )
+        except (ProductNotFoundError, SourceUnavailableError):
+            return None
+        except Exception:
+            logger.exception(
+                "Any-color variant search failed: product=%s",
+                product.key,
+            )
+            return None
+        except Exception:
+            logger.exception(
+                "Any-color variant search failed: product=%s",
+                product.key,
+            )
+            return None
+
+    try:
+        results = await asyncio.gather(*(load(product) for product in products))
+    except Exception:
+        logger.exception("Unexpected any-color comparison error")
+        await message.edit_text("Произошла ошибка при сравнении цветов.")
+        return
+
+    successful = [result for result in results if result and result.offers]
+    if not successful:
+        await message.edit_text("Предложения для выбранной памяти не найдены.")
+        return
+
+    unique: dict[tuple[str, str], ProductOffer] = {}
+    for result in successful:
+        for offer in result.offers:
+            unique.setdefault(((offer.seller or "").casefold(), offer.url), offer)
+    offers = sorted(unique.values(), key=lambda offer: float(offer.price))
+    cheapest_result = min(
+        successful,
+        key=lambda result: min(float(offer.price) for offer in result.offers),
+    )
+    comparison = replace(
+        cheapest_result,
+        offers=offers,
+        query=original_query or cheapest_result.query,
+    )
+    product_key = cheapest_result.product_key or products[0].key
+
+    chat_id = message_chat_id(message)
+    if chat_id is not None:
+        store_comparison_diagnostics(
+            chat_id=chat_id,
+            user_id=user_id,
+            comparison=comparison,
+        )
+    try:
+        await asyncio.to_thread(
+            get_price_history_repository().record_offers,
+            product_key,
+            comparison.product_title,
+            offers,
+        )
+    except Exception:
+        logger.exception("Any-color history write failed")
+
+    await show_comparison(
+        message=message,
+        offers=offers,
+        source_statuses=comparison.source_statuses,
+        product_key=product_key,
+        product_title=None,
+        grouped=False,
+    )
+
 
 @router.message(Command("five_search"))
 async def handle_five_element_search(
@@ -1290,7 +1404,7 @@ async def handle_search(
         owner_chat_id=message_chat_id(message),
         owner_user_id=message_user_id(message),
     )
-    groups = group_model_variants(products)
+    groups = ordered_variant_groups(products, group_model_variants)
     keyboard = build_product_keyboard(
         products=products,
         search_id=search_id,
@@ -1314,7 +1428,7 @@ def build_product_keyboard(
     """Создаёт страницу кнопок выбора товара."""
 
     builder = InlineKeyboardBuilder()
-    groups = group_model_variants(products)
+    groups = ordered_variant_groups(products, group_model_variants)
     start = page * PRODUCT_PAGE_SIZE
     end = start + PRODUCT_PAGE_SIZE
 
@@ -1329,17 +1443,7 @@ def build_product_keyboard(
                 button_text[:55] + "..."
             )
 
-        if (
-            len(group.products) == 1
-            and requested_color_key(group.products[0].title) is None
-        ):
-            callback_data = (
-                f"ol:{group.products[0].key}"
-            )
-        else:
-            callback_data = (
-                f"olg:{search_id}:{group_index}"
-            )
+        callback_data = f"olg:{search_id}:{group_index}"
 
         builder.row(
             InlineKeyboardButton(
@@ -1438,6 +1542,7 @@ async def show_color_selection(
     group: ProductVariantGroup,
     products: list[ProductCandidate],
     back_callback: str,
+    any_callback: str | None = None,
     original_query: str | None = None,
     user_id: int | None = None,
 ) -> None:
@@ -1471,6 +1576,13 @@ async def show_color_selection(
         color_key for color_key, _ in choices
     )
     builder = InlineKeyboardBuilder()
+    if any_callback is not None:
+        builder.row(
+            InlineKeyboardButton(
+                text="🎨 Любой — найти дешевле",
+                callback_data=any_callback,
+            )
+        )
     sorted_choices = sorted(
         choices.items(),
         key=lambda item: (
@@ -1505,8 +1617,8 @@ async def show_color_selection(
 
     await message.edit_text(
         f"📱 {group.title}\n\n"
-        "Выбери цвет. Если у цвета несколько вариантов памяти, "
-        "она указана в кнопке:",
+        "Выбери цвет или нажми «Любой», чтобы найти "
+        "самую низкую цену среди всех цветов выбранной памяти:",
         reply_markup=builder.as_markup(),
     )
 
@@ -1536,32 +1648,6 @@ def store_product_search(
             product_key=product.key,
             query=query,
         )
-    product_session_registry.register(
-        search_id,
-        query=query,
-        owner_chat_id=owner_chat_id,
-        owner_user_id=owner_user_id,
-    )
-    for product in products:
-        selection_query_registry.remember(
-            chat_id=owner_chat_id,
-            user_id=owner_user_id,
-            product_key=product.key,
-            query=query,
-        )
-    product_session_registry.register(
-        search_id,
-        query=query,
-        owner_chat_id=owner_chat_id,
-        owner_user_id=owner_user_id,
-    )
-    for product in products:
-        selection_query_registry.remember(
-            chat_id=owner_chat_id,
-            user_id=owner_user_id,
-            product_key=product.key,
-            query=query,
-        )
 
     if parent is not None:
         product_search_parents[search_id] = parent
@@ -1571,8 +1657,6 @@ def store_product_search(
             last=False
         )
         product_search_parents.pop(expired_search_id, None)
-        product_session_registry.remove(expired_search_id)
-        product_session_registry.remove(expired_search_id)
         product_session_registry.remove(expired_search_id)
 
     return search_id
