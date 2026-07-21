@@ -21,7 +21,6 @@ jobs:
         with:
           python-version: '3.13'
       - run: python tools/update_pagination_test.py
-      - run: python -m unittest tests.test_source_statuses.SourceStatusesTest.test_paginates_product_variants
       - name: Commit update
         run: |
           git config user.name "github-actions[bot]"
@@ -29,3 +28,4 @@ jobs:
           git add tests/test_source_statuses.py
           git commit -m "Update pagination test for memory selection"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - run: python -m unittest tests.test_source_statuses.SourceStatusesTest.test_paginates_product_variants
