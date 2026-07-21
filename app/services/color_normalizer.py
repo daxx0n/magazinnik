@@ -44,11 +44,29 @@ _ALIASES = {
 }
 
 
+_VARIANT_ALIASES = {
+    "mint": {"mint", "mint green", "мятный", "мятный зеленый"},
+    "hazel": {"hazel", "лесной орех", "walnut"},
+    "obsidian": {"obsidian", "обсидиан", "space black"},
+    "moonstone": {"moonstone", "лунный камень"},
+    "jade": {"jade", "нефрит"},
+}
+
+
 def normalize_color(value: str | None) -> ColorIdentity | None:
     if not value:
         return None
 
     text = " ".join(value.casefold().replace("ё", "е").split())
+    for variant, aliases in _VARIANT_ALIASES.items():
+        for alias in aliases:
+            if alias in text:
+                family = next(
+                    family for family, family_aliases in _ALIASES.items()
+                    if alias in family_aliases
+                )
+                return ColorIdentity(family=family, variant=variant)
+
     for family, aliases in _ALIASES.items():
         for alias in aliases:
             if alias in text:
@@ -65,4 +83,4 @@ def colors_match(requested: str | None, candidate: str | None) -> bool:
     if cand is None:
         return False
 
-    return req.variant == cand.variant or req.family == cand.family
+    return req.variant == cand.variant
