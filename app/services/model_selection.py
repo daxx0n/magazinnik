@@ -17,7 +17,7 @@ _COLOR_ALIAS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "white",
         re.compile(
             r"\b(?:snow|снег\w*|porcelain|фарфор\w*|"
-            r"cloud\s+white|white|бел\w*)\b",
+            r"cloud\s+white|frost|фрост\w*|white|бел\w*)\b",
             re.IGNORECASE,
         ),
     ),
@@ -32,7 +32,8 @@ _COLOR_ALIAS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "green",
         re.compile(
-            r"\b(?:hazel|lemongrass|mint|sage|green|"
+            r"\b(?:hazel|lemongrass|forest\s+hazel|jade|mint|sage|green|"
+            r"нефрит\w*|лемонграсс\w*|лесн\w*\s+орех\w*|"
             r"мятн\w*|зелен\w*)\b",
             re.IGNORECASE,
         ),
@@ -40,21 +41,22 @@ _COLOR_ALIAS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "blue",
         re.compile(
-            r"\b(?:bay|blue|navy|голуб\w*|син\w*)\b",
+            r"\b(?:bay|blue|navy|indigo|индиго\w*|голуб\w*|син\w*)\b",
             re.IGNORECASE,
         ),
     ),
     (
         "pink",
         re.compile(
-            r"\b(?:peony|rose|pink|розов\w*)\b",
+            r"\b(?:peony|rose|berry|pink|ягод\w*|розов\w*)\b",
             re.IGNORECASE,
         ),
     ),
     (
         "gray",
         re.compile(
-            r"\b(?:graphite|gray|grey|сер(?:ый|ая|ое|ые)|"
+            r"\b(?:graphite|moonstone|mist|fog|gray|grey|"
+            r"лунн\w*\s+камень|туман\w*|сер(?:ый|ая|ое|ые)|"
             r"графитов\w*)\b",
             re.IGNORECASE,
         ),
@@ -70,7 +72,7 @@ _COLOR_ALIAS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "purple",
         re.compile(
-            r"\b(?:lavender|lilac|purple|сирен\w*|"
+            r"\b(?:lavender|lilac|purple|лаванд\w*|сирен\w*|"
             r"лилов\w*|фиолет\w*)\b",
             re.IGNORECASE,
         ),
@@ -189,16 +191,21 @@ def group_model_variants(
 ) -> list[ProductVariantGroup]:
     """Объединяет цвета и память одной физической модели."""
 
+    product_list = list(products)
+    contextual_stems = _contextual_parenthetical_color_stems(product_list)
     groups: dict[str, list[ProductCandidate]] = {}
     titles: dict[str, str] = {}
 
-    for product in products:
-        title = model_variant_title(product.title)
-        key = re.sub(
-            r"[^a-zа-я0-9]+",
-            " ",
-            title.casefold().replace("ё", "е"),
-        ).strip()
+    for product in product_list:
+        source_title = product.title
+        contextual = _parenthetical_stem(source_title)
+        if (
+            contextual is not None
+            and _model_key(model_variant_title(contextual)) in contextual_stems
+        ):
+            source_title = contextual
+        title = model_variant_title(source_title)
+        key = _model_key(title)
         groups.setdefault(key, []).append(product)
         titles.setdefault(key, title)
 
@@ -209,6 +216,58 @@ def group_model_variants(
         )
         for key, group_products in groups.items()
     ]
+
+
+def _model_key(title: str) -> str:
+    return re.sub(
+        r"[^a-zа-я0-9]+",
+        " ",
+        title.casefold().replace("ё", "е"),
+    ).strip()
+
+
+_TECHNICAL_PARENTHETICAL = re.compile(
+    r"^(?:wi[- ]?fi|lte|5g|4g|global|china|cn|eu|us|usa|"
+    r"dual\s*sim|single\s*sim|esim|refurbished|renewed|"
+    r"уценк\w*|восстановлен\w*|без\s+дисковода)$",
+    re.IGNORECASE,
+)
+
+
+def _parenthetical_stem(title: str) -> str | None:
+    match = re.search(r"\s*\(([^()]*)\)\s*$", title)
+    if match is None:
+        return None
+    suffix = " ".join(match.group(1).split())
+    if (
+        not suffix
+        or len(suffix) > 40
+        or any(character.isdigit() for character in suffix)
+        or _TECHNICAL_PARENTHETICAL.fullmatch(suffix) is not None
+    ):
+        return None
+    return title[: match.start()].strip(" -/,")
+
+
+def _contextual_parenthetical_color_stems(
+    products: list[ProductCandidate],
+) -> set[str]:
+    variants: dict[str, set[str]] = {}
+    bare_keys = {_model_key(model_variant_title(product.title)) for product in products}
+    for product in products:
+        stem = _parenthetical_stem(product.title)
+        if stem is None:
+            continue
+        suffix_match = re.search(r"\(([^()]*)\)\s*$", product.title)
+        if suffix_match is None:
+            continue
+        key = _model_key(model_variant_title(stem))
+        variants.setdefault(key, set()).add(suffix_match.group(1).casefold())
+    return {
+        key
+        for key, suffixes in variants.items()
+        if len(suffixes) >= 2 or key in bare_keys
+    }
 
 
 def selected_color_label(title: str) -> str | None:
