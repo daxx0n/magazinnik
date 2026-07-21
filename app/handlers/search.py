@@ -1009,6 +1009,12 @@ async def load_any_color_comparison(
                 product.key,
             )
             return None
+        except Exception:
+            logger.exception(
+                "Any-color variant search failed: product=%s",
+                product.key,
+            )
+            return None
 
     try:
         results = await asyncio.gather(*(load(product) for product in products))
