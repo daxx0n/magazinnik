@@ -25,6 +25,10 @@ from app.models.search_result import (
     ComparisonResult,
     SourceSearchStatus,
 )
+from app.services.any_color import (
+    aggregate_any_color_results,
+    load_any_color_results,
+)
 from app.services.model_selection import (
     group_model_variants,
     requested_color_key,
@@ -1003,46 +1007,18 @@ async def load_any_color_comparison(
             )
         except (ProductNotFoundError, SourceUnavailableError):
             return None
-        except Exception:
-            logger.exception(
-                "Any-color variant search failed: product=%s",
-                product.key,
-            )
-            return None
-        except Exception:
-            logger.exception(
-                "Any-color variant search failed: product=%s",
-                product.key,
-            )
-            return None
 
-    try:
-        results = await asyncio.gather(*(load(product) for product in products))
-    except Exception:
-        logger.exception("Unexpected any-color comparison error")
-        await message.edit_text("Произошла ошибка при сравнении цветов.")
-        return
-
-    successful = [result for result in results if result and result.offers]
-    if not successful:
+    results = await load_any_color_results(products, load)
+    comparison = aggregate_any_color_results(
+        results,
+        original_query=original_query,
+    )
+    if comparison is None:
         await message.edit_text("Предложения для выбранной памяти не найдены.")
         return
 
-    unique: dict[tuple[str, str], ProductOffer] = {}
-    for result in successful:
-        for offer in result.offers:
-            unique.setdefault(((offer.seller or "").casefold(), offer.url), offer)
-    offers = sorted(unique.values(), key=lambda offer: float(offer.price))
-    cheapest_result = min(
-        successful,
-        key=lambda result: min(float(offer.price) for offer in result.offers),
-    )
-    comparison = replace(
-        cheapest_result,
-        offers=offers,
-        query=original_query or cheapest_result.query,
-    )
-    product_key = cheapest_result.product_key or products[0].key
+    offers = comparison.offers
+    product_key = comparison.product_key or products[0].key
 
     chat_id = message_chat_id(message)
     if chat_id is not None:
