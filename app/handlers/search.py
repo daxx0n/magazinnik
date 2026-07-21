@@ -1003,6 +1003,12 @@ async def load_any_color_comparison(
             )
         except (ProductNotFoundError, SourceUnavailableError):
             return None
+        except Exception:
+            logger.exception(
+                "Any-color variant search failed: product=%s",
+                product.key,
+            )
+            return None
 
     try:
         results = await asyncio.gather(*(load(product) for product in products))
@@ -1530,7 +1536,7 @@ async def show_color_selection(
     group: ProductVariantGroup,
     products: list[ProductCandidate],
     back_callback: str,
-    any_callback: str,
+    any_callback: str | None = None,
     original_query: str | None = None,
     user_id: int | None = None,
 ) -> None:
@@ -1564,12 +1570,13 @@ async def show_color_selection(
         color_key for color_key, _ in choices
     )
     builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text="🎨 Любой — найти дешевле",
-            callback_data=any_callback,
+    if any_callback is not None:
+        builder.row(
+            InlineKeyboardButton(
+                text="🎨 Любой — найти дешевле",
+                callback_data=any_callback,
+            )
         )
-    )
     sorted_choices = sorted(
         choices.items(),
         key=lambda item: (

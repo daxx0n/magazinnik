@@ -563,7 +563,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 11)
         self.assertEqual(
             rows[0][0].callback_data,
-            "ol:model-10",
+            "olg:search:10",
         )
         self.assertEqual(
             rows[9][0].callback_data,
