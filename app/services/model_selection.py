@@ -199,7 +199,10 @@ def group_model_variants(
     for product in product_list:
         source_title = product.title
         contextual = _parenthetical_stem(source_title)
-        if contextual is not None and _model_key(contextual) in contextual_stems:
+        if (
+            contextual is not None
+            and _model_key(model_variant_title(contextual)) in contextual_stems
+        ):
             source_title = contextual
         title = model_variant_title(source_title)
         key = _model_key(title)
