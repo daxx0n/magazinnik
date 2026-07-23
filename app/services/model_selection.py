@@ -149,9 +149,7 @@ def explicit_color_mismatch(
     )
 
 
-def significant_model_numbers(value: str) -> set[str]:
-    """Извлекает номер поколения, исключая RAM и накопитель."""
-
+def _normalized_model_number_source(value: str) -> str:
     normalized = value.casefold().replace("ё", "е")
     normalized = re.sub(
         r"\bps\s*([45])\b",
@@ -166,19 +164,31 @@ def significant_model_numbers(value: str) -> set[str]:
         normalized,
         flags=re.IGNORECASE,
     )
-    normalized = re.sub(
+    return re.sub(
         r"\b\d+\s*(?:gb|tb|mb|гб|тб|мб)\b",
         " ",
         normalized,
         flags=re.IGNORECASE,
     )
 
-    numbers = set(
+
+def significant_model_numbers(value: str) -> set[str]:
+    """Извлекает номер поколения, исключая RAM и накопитель."""
+
+    normalized = _normalized_model_number_source(value)
+    return set(
         re.findall(
             r"(?<![a-zа-я0-9])\d{1,2}(?![a-zа-я0-9])",
             normalized,
         )
     )
+
+
+def search_generation_numbers(value: str) -> set[str]:
+    """Дополняет поисковый номер поколениями вида Pixel 8a и Pixel 10a."""
+
+    normalized = _normalized_model_number_source(value)
+    numbers = significant_model_numbers(value)
     numbers.update(
         re.findall(
             r"(?<![a-zа-я0-9])(\d{1,2})(?=[a-zа-я]\b)",
@@ -195,7 +205,7 @@ def filter_products_by_query_generation(
     """Оставляет выбранное поколение, но не обнуляет поиск при неточном вводе."""
 
     product_list = list(products)
-    requested_numbers = significant_model_numbers(query)
+    requested_numbers = search_generation_numbers(query)
     if not requested_numbers:
         return product_list
 
@@ -203,7 +213,7 @@ def filter_products_by_query_generation(
         product
         for product in product_list
         if requested_numbers.issubset(
-            significant_model_numbers(product.title)
+            search_generation_numbers(product.title)
         )
     ]
     return matching or product_list
