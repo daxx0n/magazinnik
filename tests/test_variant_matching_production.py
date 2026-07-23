@@ -11,6 +11,10 @@ class VariantMatchingProductionTest(unittest.TestCase):
                 "Смартфон Apple iPhone 17 Pro 12GB/256GB Dual SIM",
             ),
             (
+                "Apple iPhone 17 Pro 256GB EU",
+                "Apple iPhone 17 Pro 256GB EAC",
+            ),
+            (
                 "Microsoft Xbox Series X 1TB",
                 "Игровая приставка Microsoft Xbox Series X 1024GB",
             ),
