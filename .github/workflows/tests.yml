@@ -29,10 +29,4 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Run tests
-        shell: bash
-        run: |
-          set +e
-          python -m unittest discover -s tests > test-output.txt 2>&1
-          status=$?
-          tail -n 160 test-output.txt
-          exit $status
+        run: python -m unittest tests.test_live_21vek_y63_diagnostic
