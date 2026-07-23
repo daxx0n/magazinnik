@@ -62,9 +62,12 @@ class SearchPresentationContractTest(unittest.TestCase):
         self.assertIn("🏷️ ", source)
 
     def test_no_memory_flow_supports_direct_all_color_callback(self) -> None:
-        source = inspect.getsource(search.handle_variant_group)
-        self.assertIn('raw_memory_index}:all', source)
-        self.assertIn("memory_selected=False", source)
+        group_source = inspect.getsource(search.handle_variant_group)
+        any_color_source = inspect.getsource(search.handle_any_color_selection)
+
+        self.assertIn('raw_memory_index}:all', group_source)
+        self.assertIn("memory_selected=False", group_source)
+        self.assertIn('raw_memory_index == "all"', any_color_source)
 
 
 if __name__ == "__main__":
