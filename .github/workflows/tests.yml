@@ -26,25 +26,25 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -q -r requirements.txt
 
-      - name: Run tests
+      - name: Run live phone cross-source matrix
         shell: bash
         run: |
           set +e
-          python -m unittest discover -s tests > test-output.txt 2>&1
-          echo $? > test-status.txt
+          PYTHONPATH=. python scripts/live_phone_cross_source_matrix.py > matrix-output.txt 2>&1
+          echo $? > matrix-status.txt
           exit 0
 
-      - name: Upload test output
+      - name: Upload live matrix output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: full-unittest-output
+          name: live-phone-matrix
           path: |
-            test-output.txt
-            test-status.txt
+            matrix-output.txt
+            matrix-status.txt
 
-      - name: Propagate test status
+      - name: Propagate matrix status
         shell: bash
-        run: exit "$(cat test-status.txt)"
+        run: exit "$(cat matrix-status.txt)"
