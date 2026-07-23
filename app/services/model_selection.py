@@ -4,7 +4,6 @@ from collections.abc import Iterable
 from app.models.product import ProductCandidate
 from app.services.color_normalizer import (
     EXACT_VARIANT,
-    color_identities_match,
     extract_color_identity,
 )
 from app.services.product_variants import (
@@ -95,13 +94,6 @@ _COLOR_DESCRIPTOR_PATTERN = re.compile(
     r")$",
     re.IGNORECASE,
 )
-_STRICT_COLOR_VARIANTS = {
-    "mint",
-    "hazel",
-    "jade",
-    "obsidian",
-    "moonstone",
-}
 
 
 def requested_color_key(value: str | None) -> str | None:
@@ -124,21 +116,19 @@ def explicit_color_mismatch(
     requested_title: str | None,
     candidate_title: str,
 ) -> bool:
-    """Строго проверяет выбранный фирменный вариант при наличии exact identity."""
+    """Разделяет разные exact-variant, сохраняя общий цвет как fallback."""
 
     requested_identity = extract_color_identity(requested_title)
+    candidate_identity = extract_color_identity(candidate_title)
+
     if (
         requested_identity is not None
         and requested_identity.confidence == EXACT_VARIANT
-        and requested_identity.variant in _STRICT_COLOR_VARIANTS
     ):
-        candidate_identity = extract_color_identity(candidate_title)
         if candidate_identity is None:
             return True
-        return not color_identities_match(
-            requested_identity,
-            candidate_identity,
-        )
+        if candidate_identity.confidence == EXACT_VARIANT:
+            return requested_identity.variant != candidate_identity.variant
 
     requested_color = requested_color_key(requested_title)
     candidate_color = requested_color_key(candidate_title)
