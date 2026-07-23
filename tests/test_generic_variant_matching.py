@@ -112,6 +112,10 @@ class GenericVariantMatchingTest(unittest.TestCase):
                 "Sony PlayStation 5 Slim White",
                 "Sony PlayStation 4 Slim White",
             ),
+            (
+                "Google Pixel 8 8GB/128GB Mint",
+                "Google Pixel 7 8GB/128GB Hazel",
+            ),
         ]
         for canonical, other in cases:
             with self.subTest(canonical=canonical):
@@ -149,10 +153,48 @@ class GenericVariantMatchingTest(unittest.TestCase):
                 )
                 self.assertEqual(reason, expected)
 
+    def test_rejects_exact_marketing_variant_differences(self) -> None:
+        cases = [
+            (
+                "Google Pixel 8 8GB/128GB Mint",
+                "Google Pixel 8 8GB/128GB Hazel",
+            ),
+            (
+                "Google Pixel 10 12GB/256GB Jade",
+                "Google Pixel 10 12GB/256GB Moonstone",
+            ),
+            (
+                "Apple iPhone 15 Pro 256GB Natural Titanium",
+                "Apple iPhone 15 Pro 256GB Blue Titanium",
+            ),
+            (
+                "Samsung Galaxy S24 Ultra Titanium Gray",
+                "Samsung Galaxy S24 Ultra Titanium Black",
+            ),
+            (
+                "Xiaomi 15 Forest Green",
+                "Xiaomi 15 Ocean Blue",
+            ),
+        ]
+        for canonical, other in cases:
+            with self.subTest(canonical=canonical):
+                self.assertEqual(
+                    CatalogFirstPriceService._model_mismatch_reason(
+                        canonical,
+                        other,
+                        requested_title=canonical,
+                    ),
+                    "color",
+                )
+
     def test_accepts_same_product_with_different_store_wording(self) -> None:
         cases = [
             (
-                "Google Pixel 8 8GB/128GB (Obsidian)",
+                "Google Pixel 8 8GB/128GB Obsidian",
+                "Телефон Google Pixel 8 8/128 ГБ обсидиан",
+            ),
+            (
+                "Google Pixel 8 8GB/128GB Obsidian",
                 "Телефон Google Pixel 8 8/128 ГБ черный",
             ),
             (

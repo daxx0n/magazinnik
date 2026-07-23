@@ -2,6 +2,10 @@ import re
 from collections.abc import Iterable
 
 from app.models.product import ProductCandidate
+from app.services.color_normalizer import (
+    EXACT_VARIANT,
+    extract_color_identity,
+)
 from app.services.product_variants import (
     ProductVariantGroup,
     base_product_title,
@@ -112,7 +116,19 @@ def explicit_color_mismatch(
     requested_title: str | None,
     candidate_title: str,
 ) -> bool:
-    """Строго проверяет цвет после выбора конечной модификации."""
+    """Разделяет разные exact-variant, сохраняя общий цвет как fallback."""
+
+    requested_identity = extract_color_identity(requested_title)
+    candidate_identity = extract_color_identity(candidate_title)
+
+    if (
+        requested_identity is not None
+        and requested_identity.confidence == EXACT_VARIANT
+    ):
+        if candidate_identity is None:
+            return True
+        if candidate_identity.confidence == EXACT_VARIANT:
+            return requested_identity.variant != candidate_identity.variant
 
     requested_color = requested_color_key(requested_title)
     candidate_color = requested_color_key(candidate_title)
