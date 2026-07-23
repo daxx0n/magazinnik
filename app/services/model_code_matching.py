@@ -124,6 +124,11 @@ def marketing_identity_words(value: str) -> tuple[str, ...]:
     neutral = neutralize_variant_markers(color_neutral_title(value))
     normalized = _normalize(neutral)
     _, long_code_parts = _separated_long_codes(normalized)
+    blocked_code_words = {
+        word
+        for part in long_code_parts
+        for word in re.findall(r"[a-zа-я]+", part)
+    }
 
     return tuple(
         token
@@ -131,7 +136,7 @@ def marketing_identity_words(value: str) -> tuple[str, ...]:
         if (
             len(token) >= 2
             and token not in _GENERIC_PRODUCT_WORDS
-            and token not in long_code_parts
+            and token not in blocked_code_words
         )
     )
 
