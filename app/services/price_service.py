@@ -33,6 +33,7 @@ from app.sources.twenty_one_vek import (
 )
 from app.sources.zeon import ZeonSource
 from app.services.catalog_service import CatalogService
+from app.services.model_code_matching import technical_model_code_words
 from app.services.product_variants import (
     display_color,
     extract_color,
@@ -1176,6 +1177,13 @@ class PriceService:
             "электрический",
         }
 
+        canonical_code_words = technical_model_code_words(
+            canonical_title
+        )
+        candidate_code_words = technical_model_code_words(
+            candidate_title
+        )
+
         canonical_brand = next(
             (
                 token
@@ -1184,6 +1192,7 @@ class PriceService:
                     re.fullmatch(r"[a-z]+", token)
                     and token
                     not in generic_title_words
+                    and token not in canonical_code_words
                 )
             ),
             None,
@@ -1197,6 +1206,7 @@ class PriceService:
                     if (
                         token.isalpha()
                         and token not in generic_title_words
+                        and token not in canonical_code_words
                     )
                 ),
                 None,
@@ -1210,6 +1220,7 @@ class PriceService:
             {"microsoft", "surface", "xbox"},
             {"playstation", "sony"},
             {"poco", "redmi", "xiaomi"},
+            {"yandex", "яндекс"},
         )
         canonical_brand_aliases = next(
             (
@@ -1226,6 +1237,7 @@ class PriceService:
                 if (
                     re.fullmatch(r"[a-z]+", token)
                     and token not in generic_title_words
+                    and token not in candidate_code_words
                 )
             ),
             None,
@@ -1239,6 +1251,7 @@ class PriceService:
                     if (
                         token.isalpha()
                         and token not in generic_title_words
+                        and token not in candidate_code_words
                     )
                 ),
                 None,

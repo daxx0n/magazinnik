@@ -84,6 +84,26 @@ _CONDITION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
+_DISPLAY_CONFIGURATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "without_display",
+        re.compile(
+            r"\b(?:без\s+(?:час\w*|диспле\w*|экран\w*)|"
+            r"without\s+(?:clock|display|screen))\b",
+            re.I,
+        ),
+    ),
+    (
+        "with_display",
+        re.compile(
+            r"\b(?:(?:с|со)\s+(?:час\w*|диспле\w*|экран\w*)|"
+            r"with\s+(?:clock|display|screen))\b",
+            re.I,
+        ),
+    ),
+)
+
+
 _VARIANT_REMOVERS = (
     re.compile(
         r"\b(?:dual\s+e[-\s]?sim|dual\s+sim|single\s+sim|"
@@ -224,6 +244,17 @@ def voice_configuration(value: str | None) -> str | None:
     return None
 
 
+def clock_display_configuration(value: str | None) -> str | None:
+    """Returns an explicit with/without clock or display configuration."""
+
+    if not value:
+        return None
+    for configuration, pattern in _DISPLAY_CONFIGURATION_PATTERNS:
+        if pattern.search(value):
+            return configuration
+    return None
+
+
 def product_condition(value: str | None) -> str:
     if not value:
         return "new"
@@ -332,6 +363,14 @@ def variant_mismatch_reason(
     ):
         return "configuration"
 
+    requested_display = clock_display_configuration(requested_title)
+    candidate_display = clock_display_configuration(candidate_title)
+    if (
+        requested_display != candidate_display
+        and (requested_display is not None or candidate_display is not None)
+    ):
+        return "configuration"
+
     requested_region = explicit_region(requested_title)
     candidate_region = explicit_region(candidate_title)
     if (
@@ -361,6 +400,8 @@ def neutralize_variant_markers(value: str) -> str:
     for _, pattern in _CONDITION_PATTERNS:
         result = pattern.sub(" ", result)
     for _, pattern in _REGION_PATTERNS:
+        result = pattern.sub(" ", result)
+    for _, pattern in _DISPLAY_CONFIGURATION_PATTERNS:
         result = pattern.sub(" ", result)
     for pattern in _VARIANT_REMOVERS:
         result = pattern.sub(" ", result)
