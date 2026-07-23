@@ -153,7 +153,7 @@ class GenericVariantMatchingTest(unittest.TestCase):
         cases = [
             (
                 "Google Pixel 8 8GB/128GB (Obsidian)",
-                "Телефон Google Pixel 8 8/128 ГБ черный",
+                "Телефон Google Pixel 8 8/128 ГБ обсидиан",
             ),
             (
                 "Bosch HBA-534-EB3 Black",
@@ -176,6 +176,16 @@ class GenericVariantMatchingTest(unittest.TestCase):
                     requested_title=canonical,
                 )
                 self.assertIsNone(reason)
+
+    def test_exact_marketing_color_does_not_match_generic_base(self) -> None:
+        self.assertEqual(
+            CatalogFirstPriceService._model_mismatch_reason(
+                "Google Pixel 8 8GB/128GB (Obsidian)",
+                "Телефон Google Pixel 8 8/128 ГБ черный",
+                requested_title="Google Pixel 8 8GB/128GB (Obsidian)",
+            ),
+            "color",
+        )
 
 
 if __name__ == "__main__":
