@@ -3,6 +3,7 @@ from collections.abc import Iterable
 
 from app.models.product import ProductCandidate
 from app.services.color_normalizer import (
+    UNKNOWN,
     color_identities_match,
     extract_color_identity,
     extract_color_phrase,
@@ -15,10 +16,14 @@ from app.services.product_variants import (
 
 
 def requested_color_key(value: str | None) -> str | None:
-    """Returns one shared exact-variant or base-family color key."""
+    """Returns a backward-compatible family key for UI and diagnostics."""
 
     identity = extract_color_identity(value)
-    return identity.key if identity is not None else None
+    if identity is None:
+        return None
+    if identity.confidence == UNKNOWN:
+        return identity.variant
+    return identity.family
 
 
 def explicit_color_mismatch(
