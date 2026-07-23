@@ -170,6 +170,53 @@ def significant_model_numbers(value: str) -> set[str]:
     )
 
 
+def _search_generation_numbers(value: str) -> set[str]:
+    normalized = value.casefold().replace("ё", "е")
+    normalized = re.sub(
+        r"(?<!\d)\d{1,4}\s*"
+        r"(?:gb|tb|mb|гб|тб|мб)?\s*/\s*"
+        r"\d{1,4}\s*(?:gb|tb|mb|гб|тб|мб)?(?!\w)",
+        " ",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"\b\d+\s*(?:gb|tb|mb|гб|тб|мб)\b",
+        " ",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    numbers = significant_model_numbers(value)
+    numbers.update(
+        re.findall(
+            r"(?<![a-zа-я0-9])(\d{1,2})(?=[a-zа-я]\b)",
+            normalized,
+        )
+    )
+    return numbers
+
+
+def filter_products_by_query_generation(
+    products: Iterable[ProductCandidate],
+    query: str,
+) -> list[ProductCandidate]:
+    """Оставляет точное поколение в первом экране поиска."""
+
+    product_list = list(products)
+    requested_numbers = _search_generation_numbers(query)
+    if not requested_numbers:
+        return product_list
+
+    matching = [
+        product
+        for product in product_list
+        if requested_numbers.issubset(
+            _search_generation_numbers(product.title)
+        )
+    ]
+    return matching or product_list
+
+
 def generation_mismatch(
     canonical_title: str,
     candidate_title: str,

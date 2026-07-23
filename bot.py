@@ -9,11 +9,21 @@ from app.handlers import catalog, catalog_feed, common, search
 from app.services.catalog_feed_upload import CatalogFeedUploadManager
 from app.services.catalog_first_search import CatalogFirstPriceService
 from app.services.catalog_refresh import CatalogRefreshService
+from app.services.selection_presentation import (
+    group_selection_model_variants,
+    selection_color_key,
+    selection_color_label,
+)
 
 
 search.price_service = CatalogFirstPriceService(
     catalog_service=search.price_service._catalog_service,
 )
+# UI uses exact marketing colors without changing the production matcher.
+search.group_model_variants = group_selection_model_variants
+search.requested_color_key = selection_color_key
+search.selected_color_label = selection_color_label
+
 catalog_refresh_service = CatalogRefreshService(search.price_service)
 catalog.initialize_catalog_refresh(catalog_refresh_service)
 catalog_feed.initialize_catalog_feed_upload(
