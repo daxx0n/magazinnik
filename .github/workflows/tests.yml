@@ -38,9 +38,22 @@ jobs:
         run: |
           set +e
           python -m unittest discover -s tests > test-output.txt 2>&1
-          status=$?
+          echo $? > test-status.txt
           tail -n 200 test-output.txt
-          exit $status
+          exit 0
+
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conditional-selection-test-output
+          path: |
+            test-output.txt
+            test-status.txt
+
+      - name: Propagate test status
+        shell: bash
+        run: exit "$(cat test-status.txt)"
 
       - name: Commit generated patch
         shell: bash
