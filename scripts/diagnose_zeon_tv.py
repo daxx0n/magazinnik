@@ -18,25 +18,32 @@ QUERIES = (
     "xiaomi tv a pro 50",
     "Xiaomi TV A Pro 50 2026",
     "Xiaomi TV A Pro 50 2026 L50MB-APRU",
+    'Xiaomi TV A Pro 50" 2026 L50MB-APRU',
     "L50MB-APRU",
 )
 
 
-async def download_url(source: ZeonSource, url: str) -> tuple[str, str]:
+async def download(
+    source: ZeonSource,
+    url: str,
+    *,
+    params: dict[str, str] | None = None,
+) -> tuple[str, str, list[str]]:
     async with httpx.AsyncClient(
         headers=source._headers,
         timeout=source._timeout,
         follow_redirects=True,
     ) as client:
-        response = await client.get(url)
+        response = await client.get(url, params=params)
         if source._is_verification_page(response.text):
             cookie = source._security_cookie_from_html(response.text)
             if cookie is not None:
                 name, value = cookie
                 client.cookies.set(name, value, domain="www.zeon.by", path="/")
-                response = await client.get(url)
+                response = await client.get(url, params=params)
         response.raise_for_status()
-        return response.text, str(response.url)
+        history = [str(item.url) for item in response.history]
+        return response.text, str(response.url), history
 
 
 async def main() -> None:
@@ -44,9 +51,10 @@ async def main() -> None:
     report: dict[str, object] = {"product_url": PRODUCT_URL, "searches": []}
 
     try:
-        html, page_url = await download_url(source, PRODUCT_URL)
+        html, page_url, history = await download(source, PRODUCT_URL)
         report["direct"] = {
             "page_url": page_url,
+            "history": history,
             "path": urlparse(page_url).path,
             "verification": source._is_verification_page(html),
             "offers": [
@@ -59,13 +67,25 @@ async def main() -> None:
 
     for query in QUERIES:
         try:
-            html, page_url = await source._download_search_page(query)
+            html, page_url, history = await download(
+                source,
+                source._search_url,
+                params={"q": query},
+            )
             offers = source._parse_page(html, page_url, 100)
             report["searches"].append(
                 {
                     "query": query,
                     "page_url": page_url,
-                    "catalog_cards": html.count('class="catalog-item"'),
+                    "history": history,
+                    "safe": source._is_safe_page_url(page_url),
+                    "path": urlparse(page_url).path,
+                    "catalog_cards": len(__import__("bs4").BeautifulSoup(html, "html.parser").select(".catalog-item")),
+                    "title": (
+                        __import__("bs4").BeautifulSoup(html, "html.parser").title.get_text(" ", strip=True)
+                        if __import__("bs4").BeautifulSoup(html, "html.parser").title is not None
+                        else None
+                    ),
                     "offers": [
                         {"title": item.title, "price": item.price, "url": item.url}
                         for item in offers
