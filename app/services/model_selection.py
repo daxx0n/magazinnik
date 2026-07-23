@@ -152,6 +152,7 @@ def model_version_signature(value: str | None) -> frozenset[str]:
         return frozenset()
 
     normalized = color_neutral_title(value).casefold().replace("ё", "е")
+    normalized = re.sub(r"\be[\s-]*sim\b", " ", normalized)
     normalized = re.sub(r"\bmini[\s-]*led\b", " ", normalized)
     normalized = re.sub(
         rf"\blight\s+(?:{_LIGHT_COLOR_WORDS})\b",
