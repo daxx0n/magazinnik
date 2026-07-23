@@ -46,8 +46,10 @@ from app.services.search_sessions import (
     SelectionQueryRegistry,
 )
 from app.services.selection_flow import (
+    has_memory_choice,
     ordered_memory_groups,
     ordered_variant_groups,
+    selectable_memory_groups,
 )
 from app.services.product_variants import (
     ProductVariantGroup,
@@ -841,7 +843,7 @@ async def handle_category_selection(
 async def handle_variant_group(
     callback: CallbackQuery,
 ) -> None:
-    """Показывает память выбранной модели."""
+    """Shows memory only when the selected model has real memory variants."""
 
     await callback.answer()
 
@@ -871,16 +873,40 @@ async def handle_variant_group(
     except (ValueError, IndexError):
         return
 
-    memory_groups = ordered_memory_groups(group.products)
+    if not group.products:
+        return
+
+    if not has_memory_choice(group.products):
+        user_id = callback_user_id(callback)
+        original_query = selection_query_registry.get(
+            chat_id=message_chat_id(callback.message),
+            user_id=user_id,
+            product_key=group.products[0].key,
+        )
+        await show_color_selection(
+            message=callback.message,
+            group=group,
+            products=group.products,
+            back_callback=(
+                f"olp:{search_id}:"
+                f"{group_index // PRODUCT_PAGE_SIZE}"
+            ),
+            any_callback=f"ola:{search_id}:{group_index}:all",
+            original_query=original_query,
+            user_id=user_id,
+            memory_selected=False,
+        )
+        return
+
+    memory_groups = selectable_memory_groups(group.products)
     await callback.message.edit_text(
-        f"📱 {group.title}\n\nВыбери память:",
+        f"🏷️ {group.title}\n\nВыбери память:",
         reply_markup=build_memory_keyboard(
             search_id=search_id,
             group_index=group_index,
             memory_groups=memory_groups,
         ),
     )
-
 
 @router.callback_query(
     F.data.startswith("olm:")
@@ -916,7 +942,7 @@ async def handle_memory_selection(
         group = ordered_variant_groups(products, group_model_variants)[
             group_index
         ]
-        memory_products = ordered_memory_groups(group.products)[memory_index][1]
+        memory_products = selectable_memory_groups(group.products)[memory_index][1]
     except (ValueError, IndexError):
         return
 
@@ -942,7 +968,7 @@ async def handle_memory_selection(
 
 @router.callback_query(F.data.startswith("ola:"))
 async def handle_any_color_selection(callback: CallbackQuery) -> None:
-    """Ищет минимальную цену среди всех цветов выбранной памяти."""
+    """Searches the lowest price among all colors of the selected variant."""
 
     await callback.answer()
     if callback.message is None:
@@ -952,6 +978,7 @@ async def handle_any_color_selection(callback: CallbackQuery) -> None:
     if len(parts) != 4:
         return
 
+
     _, search_id, raw_group_index, raw_memory_index = parts
     products = authorized_product_search(callback, search_id)
     if products is None:
@@ -960,17 +987,24 @@ async def handle_any_color_selection(callback: CallbackQuery) -> None:
         )
         return
 
+
     try:
         group_index = int(raw_group_index)
-        memory_index = int(raw_memory_index)
         group = ordered_variant_groups(
             products,
             group_model_variants,
         )[group_index]
-        memory_products = ordered_memory_groups(
-            group.products
-        )[memory_index][1]
+        if raw_memory_index == "all":
+            memory_products = group.products
+        else:
+            memory_index = int(raw_memory_index)
+            memory_products = selectable_memory_groups(
+                group.products
+            )[memory_index][1]
     except (ValueError, IndexError):
+        return
+
+    if not memory_products:
         return
 
     user_id = callback_user_id(callback)
@@ -985,7 +1019,6 @@ async def handle_any_color_selection(callback: CallbackQuery) -> None:
         original_query=original_query,
         user_id=user_id,
     )
-
 
 async def load_any_color_comparison(
     message: Message,
@@ -1014,7 +1047,7 @@ async def load_any_color_comparison(
         original_query=original_query,
     )
     if comparison is None:
-        await message.edit_text("Предложения для выбранной памяти не найдены.")
+        await message.edit_text("Предложения для выбранного варианта не найдены.")
         return
 
     offers = comparison.offers
@@ -1521,8 +1554,9 @@ async def show_color_selection(
     any_callback: str | None = None,
     original_query: str | None = None,
     user_id: int | None = None,
+    memory_selected: bool = True,
 ) -> None:
-    """Показывает цвет; память уточняется в подписи варианта."""
+    """Shows color choices and skips memory wording when memory is not selectable."""
 
     colored_products = [
         product
@@ -1535,7 +1569,8 @@ async def show_color_selection(
     for product in selectable_products:
         color_key = requested_color_key(product.title) or "unknown"
         memory = extract_memory(product.title) or "Без выбора памяти"
-        choices.setdefault((color_key, memory), product)
+        choice_memory = memory if memory_selected else ""
+        choices.setdefault((color_key, choice_memory), product)
 
     if len(choices) == 1:
         only_product = next(iter(choices.values()))
@@ -1570,7 +1605,7 @@ async def show_color_selection(
 
     for (color_key, memory), product in sorted_choices:
         label = selected_color_label(product.title) or "Цвет не указан"
-        if color_counts[color_key] > 1:
+        if memory_selected and color_counts[color_key] > 1:
             label = f"{label} · {memory}"
 
         builder.row(
@@ -1591,13 +1626,23 @@ async def show_color_selection(
         )
     )
 
+    if any_callback is None:
+        prompt = "Выбери цвет:"
+    elif memory_selected:
+        prompt = (
+            "Выбери цвет или нажми «Любой», чтобы найти "
+            "самую низкую цену среди всех цветов выбранной памяти:"
+        )
+    else:
+        prompt = (
+            "Выбери цвет или нажми «Любой», чтобы найти "
+            "самую низкую цену среди всех цветов:"
+        )
+
     await message.edit_text(
-        f"📱 {group.title}\n\n"
-        "Выбери цвет или нажми «Любой», чтобы найти "
-        "самую низкую цену среди всех цветов выбранной памяти:",
+        f"🏷️ {group.title}\n\n{prompt}",
         reply_markup=builder.as_markup(),
     )
-
 
 def store_product_search(
     products: list[ProductCandidate],
@@ -1808,7 +1853,7 @@ def format_search_result(
     )
 
     lines = [
-        f"📱 {product_title}",
+        f"🏷️ {product_title}",
         "",
         "Найденные предложения:",
         "",
@@ -1837,12 +1882,6 @@ def format_search_result(
             lines.append(
                 "🚚 Доставка: "
                 f"{offer.delivery_text}"
-            )
-
-        if offer.updated_at:
-            lines.append(
-                "🕒 Обновлено: "
-                f"{offer.updated_at}"
             )
 
         lines.append("")
@@ -1883,7 +1922,7 @@ async def show_comparison(
 
     if product_title:
         lines.append(
-            f"📱 {display_product_title(product_title)}"
+            f"🏷️ {display_product_title(product_title)}"
         )
 
     lines.extend(
@@ -1918,7 +1957,7 @@ async def show_comparison(
 
         if not grouped:
             lines.append(
-                f"📱 {display_product_title(offer.title)}"
+                f"🏷️ {display_product_title(offer.title)}"
             )
 
         lines.append(
@@ -1935,12 +1974,6 @@ async def show_comparison(
             lines.append(
                 "🚚 Доставка: "
                 f"{offer.delivery_text}"
-            )
-
-        if offer.updated_at:
-            lines.append(
-                "🕒 Обновлено: "
-                f"{offer.updated_at}"
             )
 
         lines.append(
@@ -2071,7 +2104,7 @@ async def check_price_alerts(bot: Bot) -> None:
                 chat_id=alert.chat_id,
                 text=(
                     "🔔 Цена снизилась\n\n"
-                    f"📱 {display_product_title(alert.title)}\n"
+                    f"🏷️ {display_product_title(alert.title)}\n"
                     f"💰 Было: {alert.last_notified_price:.2f} "
                     f"{alert.currency}\n"
                     f"✅ Стало: {current_price:.2f} "
@@ -2267,7 +2300,7 @@ def format_comparison_diagnostics(
 
     lines = [
         "🧪 Диагностика последнего сравнения",
-        f"📱 {display_product_title(product_title) or 'Не определён'}",
+        f"🏷️ {display_product_title(product_title) or 'Не определён'}",
     ]
 
     if comparison.catalog_presentation:

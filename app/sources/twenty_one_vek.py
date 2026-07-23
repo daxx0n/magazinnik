@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -49,7 +50,185 @@ class TwentyOneVekSource:
 
     _search_url = "https://www.21vek.by/search/"
 
+    _query_token_pattern = re.compile(
+        r"(?<![a-zа-я0-9])"
+        r"[a-zа-я0-9]+(?:[-_/.][a-zа-я0-9]+)*"
+        r"(?![a-zа-я0-9])",
+        re.IGNORECASE,
+    )
+    _memory_pair_pattern = re.compile(
+        r"\d{1,4}\s*(?:gb|tb|mb|гб|тб|мб)?\s*[/_-]\s*"
+        r"\d{1,4}\s*(?:gb|tb|mb|гб|тб|мб)?",
+        re.IGNORECASE,
+    )
+    _measurement_pattern = re.compile(
+        r"\d+(?:gb|tb|mb|гб|тб|мб|hz|khz|mhz|ghz|"
+        r"w|kw|v|mah|mp|g|k)",
+        re.IGNORECASE,
+    )
+    _ignored_identifier_tokens = {
+        "2sim", "3g", "4g", "5g", "4k", "8k", "esim", "lte",
+    }
+    _query_noise_words = {
+        "ai", "lcd", "led", "microled", "miniled", "monitor",
+        "nano", "nanocell", "neoqled", "oled", "qled", "qned",
+        "smart", "television", "tv", "uhd", "монитор", "смарт",
+        "телевизор",
+    }
+
+    @staticmethod
+    def _compact_identifier(value: str) -> str:
+        return re.sub(r"[^a-zа-я0-9]", "", value.casefold())
+
+    @classmethod
+    def _model_query_parts(
+        cls,
+        query: str,
+    ) -> tuple[str | None, list[str], list[str]]:
+        raw_tokens = cls._query_token_pattern.findall(query)
+        brand: str | None = None
+        family: list[str] = []
+        strong: list[str] = []
+
+        for raw_token in raw_tokens:
+            token = raw_token.strip("._/-")
+            compact = cls._compact_identifier(token)
+            if not compact:
+                continue
+
+            if (
+                brand is None
+                and token.isalpha()
+                and compact not in cls._query_noise_words
+                and len(compact) >= 2
+            ):
+                brand = token
+
+            if compact in cls._ignored_identifier_tokens:
+                continue
+            if cls._memory_pair_pattern.fullmatch(token) is not None:
+                continue
+            if cls._measurement_pattern.fullmatch(compact) is not None:
+                continue
+            if re.search(r"[a-zа-я]", compact) is None:
+                continue
+            if re.search(r"\d", compact) is None:
+                continue
+
+            has_separator = any(character in token for character in "-_/." )
+            numeric_prefix_identifier = (
+                token[0].isdigit()
+                and len(compact) >= 5
+                and sum(character.isdigit() for character in compact) >= 3
+            )
+            alpha_long_identifier = token[0].isalpha() and len(compact) >= 5
+            if has_separator or numeric_prefix_identifier or alpha_long_identifier:
+                strong.append(token)
+
+            if not has_separator and 2 <= len(compact) <= 6:
+                family.append(token)
+
+        strong_compacts = {
+            token: cls._compact_identifier(token) for token in strong
+        }
+        strong = [
+            token
+            for token in strong
+            if not any(
+                strong_compacts[token] != strong_compacts[other]
+                and strong_compacts[token] in strong_compacts[other]
+                for other in strong
+            )
+        ]
+
+        def unique(values: list[str]) -> list[str]:
+            result: list[str] = []
+            seen: set[str] = set()
+            for value in values:
+                key = value.casefold()
+                if key not in seen:
+                    seen.add(key)
+                    result.append(value)
+            return result
+
+        strong = unique(strong)
+        strong_keys = {cls._compact_identifier(token) for token in strong}
+        family = unique([
+            token
+            for token in family
+            if cls._compact_identifier(token) not in strong_keys
+        ])
+        return brand, family, strong
+
+    @classmethod
+    def _query_variants(cls, query: str) -> list[str]:
+        normalized = " ".join(query.strip().split())
+        brand, family, strong = cls._model_query_parts(normalized)
+        variants: list[str] = []
+        seen: set[str] = set()
+
+        def add(parts: list[str]) -> None:
+            value = " ".join(part for part in parts if part).strip()
+            key = value.casefold()
+            if value and key not in seen:
+                seen.add(key)
+                variants.append(value)
+
+        if strong:
+            add([brand or "", *family, *strong])
+            add([brand or "", *strong])
+        add([normalized])
+        return variants
+
     async def find_offers(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> list[ProductOffer]:
+        """Searches 21vek using compact model identity before broad text."""
+
+        normalized_query = " ".join(query.strip().split())
+        if len(normalized_query) < 3 or limit <= 0:
+            return []
+
+        variants = self._query_variants(normalized_query)
+        _, _, strong = self._model_query_parts(normalized_query)
+        strong_keys = [self._compact_identifier(token) for token in strong]
+        unique_offers: dict[str, ProductOffer] = {}
+        errors: list[SourceUnavailableError] = []
+
+        for source_query in variants:
+            try:
+                offers = await self._find_offers_once(
+                    source_query,
+                    limit=max(limit, 20),
+                )
+            except SourceUnavailableError as error:
+                errors.append(error)
+                continue
+
+            if strong_keys:
+                exact = [
+                    offer
+                    for offer in offers
+                    if any(
+                        key in self._compact_identifier(offer.title)
+                        for key in strong_keys
+                    )
+                ]
+                if exact:
+                    return exact[:limit]
+
+            for offer in offers:
+                unique_offers.setdefault(offer.url, offer)
+
+        if unique_offers:
+            return list(unique_offers.values())[:limit]
+        if errors and len(errors) == len(variants):
+            raise errors[0]
+        return []
+
+    async def _find_offers_once(
         self,
         query: str,
         limit: int = 5,

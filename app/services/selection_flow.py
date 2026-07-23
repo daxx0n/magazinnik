@@ -61,3 +61,23 @@ def ordered_memory_groups(
 
 def memory_label(product: ProductCandidate) -> str:
     return extract_memory(product.title) or "Без выбора"
+
+def selectable_memory_groups(
+    products: Iterable[ProductCandidate],
+) -> list[tuple[str, list[ProductCandidate]]]:
+    """Returns only explicit memory variants suitable for user selection."""
+
+    return [
+        group
+        for group in ordered_memory_groups(products)
+        if group[0] != "Без выбора"
+    ]
+
+
+def has_memory_choice(
+    products: Iterable[ProductCandidate],
+) -> bool:
+    """True only when a model has at least two explicit memory variants."""
+
+    return len(selectable_memory_groups(products)) > 1
+
