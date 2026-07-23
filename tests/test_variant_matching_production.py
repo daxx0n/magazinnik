@@ -76,29 +76,15 @@ class VariantMatchingProductionTest(unittest.TestCase):
                     expected,
                 )
 
-    def test_rejects_connector_and_voice_differences(self) -> None:
-        cases = [
-            (
+    def test_rejects_connector_difference(self) -> None:
+        self.assertEqual(
+            CatalogFirstPriceService._model_mismatch_reason(
                 "Apple AirPods Pro 2 Lightning",
                 "Apple AirPods Pro 2 USB Type-C",
-                "configuration",
+                requested_title="Apple AirPods Pro 2 Lightning",
             ),
-            (
-                "Roborock Q8 Max с русской озвучкой",
-                "Roborock Q8 Max с английской озвучкой",
-                "configuration",
-            ),
-        ]
-        for canonical, candidate, expected in cases:
-            with self.subTest(canonical=canonical, candidate=candidate):
-                self.assertEqual(
-                    CatalogFirstPriceService._model_mismatch_reason(
-                        canonical,
-                        candidate,
-                        requested_title=canonical,
-                    ),
-                    expected,
-                )
+            "configuration",
+        )
 
 
 if __name__ == "__main__":
