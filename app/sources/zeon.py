@@ -176,14 +176,24 @@ class ZeonSource:
             if re.search(r"\d", compact) is None:
                 continue
 
-            has_separator = any(character in token for character in "-_/." )
-            if not has_separator and not token[0].isalpha():
+            has_separator = any(character in token for character in "-_/.")
+            starts_with_letter = token[0].isalpha()
+            numeric_prefix_identifier = (
+                not starts_with_letter
+                and len(compact) >= 5
+                and sum(character.isdigit() for character in compact) >= 3
+            )
+            if (
+                not has_separator
+                and not starts_with_letter
+                and not numeric_prefix_identifier
+            ):
                 continue
             if len(compact) < 2:
                 continue
             identifiers.append(token)
 
-        return sorted(
+        ordered = sorted(
             dict.fromkeys(identifiers),
             key=lambda value: (
                 any(character in value for character in "-_/."),
@@ -191,6 +201,19 @@ class ZeonSource:
             ),
             reverse=True,
         )
+        compact_values = {
+            value: re.sub(r"[^a-zа-я0-9]", "", value.casefold())
+            for value in ordered
+        }
+        return [
+            value
+            for value in ordered
+            if not any(
+                compact_values[value] != compact_values[other]
+                and compact_values[value] in compact_values[other]
+                for other in ordered
+            )
+        ]
 
     async def _download_search_page(
         self,

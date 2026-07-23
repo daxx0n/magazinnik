@@ -27,6 +27,11 @@ _MEMORY_TOKEN_RE = re.compile(
     r"\d+(?:gb|tb|mb|гб|тб|мб)",
     re.IGNORECASE,
 )
+_MEASUREMENT_CODE_RE = re.compile(
+    r"\d+(?:gb|tb|mb|гб|тб|мб|hz|khz|mhz|ghz|"
+    r"w|kw|v|mah|mp|g|k)",
+    re.IGNORECASE,
+)
 _IGNORED_SHORT_CODES = {
     "2sim",
     "3g",
@@ -93,6 +98,69 @@ def explicit_long_model_codes(value: str) -> set[str]:
             codes.add(token)
 
     return codes
+
+
+def _compatible_explicit_model_codes(first: str, second: str) -> bool:
+    if first == second:
+        return True
+
+    shorter, longer = sorted((first, second), key=len)
+    if len(shorter) >= 5 and longer.endswith(shorter):
+        return True
+    if not longer.startswith(shorter):
+        return False
+
+    regional_suffix = longer[len(shorter):]
+    supports_regional_suffix = bool(
+        re.fullmatch(
+            r"(?:sm[a-z]\d{3,4}[a-z]|[mnfp][a-z0-9]{4})",
+            shorter,
+        )
+    )
+    return (
+        supports_regional_suffix
+        and len(regional_suffix) >= 2
+        and bool(re.search(r"[a-zа-я]", regional_suffix))
+    )
+
+
+def most_specific_model_codes(value: str) -> set[str]:
+    """Returns strongest explicit codes, dropping specs and family substrings."""
+
+    codes = {
+        code
+        for code in explicit_long_model_codes(value)
+        if (
+            code not in _IGNORED_SHORT_CODES
+            and _MEASUREMENT_CODE_RE.fullmatch(code) is None
+        )
+    }
+    return {
+        code
+        for code in codes
+        if not any(
+            code != other and code in other
+            for other in codes
+        )
+    }
+
+
+def explicit_model_code_mismatch(
+    requested_title: str,
+    candidate_title: str,
+) -> bool:
+    """Rejects different explicit full codes even when a family token matches."""
+
+    requested_codes = most_specific_model_codes(requested_title)
+    candidate_codes = most_specific_model_codes(candidate_title)
+    if not requested_codes or not candidate_codes:
+        return False
+
+    return not any(
+        _compatible_explicit_model_codes(requested, candidate)
+        for requested in requested_codes
+        for candidate in candidate_codes
+    )
 
 
 def short_marketing_model_codes(value: str) -> set[str]:
