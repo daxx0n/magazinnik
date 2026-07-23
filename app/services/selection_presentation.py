@@ -11,7 +11,11 @@ from collections.abc import Iterable
 
 from app.models.product import ProductCandidate
 from app.services.color_normalizer import EXACT_VARIANT, extract_color_identity
-from app.services.model_selection import group_model_variants, requested_color_key
+from app.services.model_selection import (
+    group_model_variants,
+    requested_color_key,
+    selected_color_label as legacy_color_label,
+)
 from app.services.product_variants import ProductVariantGroup
 
 
@@ -35,12 +39,11 @@ def selection_color_key(title: str | None) -> str | None:
 
 
 def selection_color_label(title: str) -> str | None:
-    """Returns a label for UI-only colors not known by the legacy formatter."""
+    """Returns existing labels plus UI-only marketing color names."""
 
-    match = _ISAI_BLUE_SUFFIX.search(title)
-    if match is not None:
+    if _ISAI_BLUE_SUFFIX.search(title) is not None:
         return "Isai Blue"
-    return None
+    return legacy_color_label(title)
 
 
 def group_selection_model_variants(
