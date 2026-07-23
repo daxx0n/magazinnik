@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python scripts/live_phone_cross_source_matrix.py > matrix-output.txt 2>&1
+          PYTHONPATH=. python scripts/live_phone_cross_source_matrix.py > matrix-output.txt 2>&1
           echo $? > matrix-status.txt
           exit 0
 
