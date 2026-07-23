@@ -37,6 +37,45 @@ class VariantMatchingProductionTest(unittest.TestCase):
                     )
                 )
 
+    def test_rejects_memory_region_sim_and_device_configuration(self) -> None:
+        cases = [
+            (
+                "Apple iPhone 17 Pro 256GB",
+                "Apple iPhone 17 Pro 512GB",
+                "memory",
+            ),
+            (
+                "Apple iPhone 17 Pro 256GB EU",
+                "Apple iPhone 17 Pro 256GB US",
+                "region",
+            ),
+            (
+                "Apple iPhone 17 Pro 256GB Dual SIM",
+                "Apple iPhone 17 Pro 256GB eSIM only",
+                "sim",
+            ),
+            (
+                "Samsung Galaxy Tab S10 256GB 4G",
+                "Samsung Galaxy Tab S10 256GB 5G",
+                "configuration",
+            ),
+            (
+                "Sony PlayStation 5 Slim Digital Edition",
+                "Sony PlayStation 5 Slim с дисководом",
+                "configuration",
+            ),
+        ]
+        for canonical, candidate, expected in cases:
+            with self.subTest(canonical=canonical, candidate=candidate):
+                self.assertEqual(
+                    CatalogFirstPriceService._model_mismatch_reason(
+                        canonical,
+                        candidate,
+                        requested_title=canonical,
+                    ),
+                    expected,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
