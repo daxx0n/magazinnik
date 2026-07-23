@@ -1206,7 +1206,6 @@ class PriceService:
                     if (
                         token.isalpha()
                         and token not in generic_title_words
-                        and token not in candidate_code_words
                         and token not in canonical_code_words
                     )
                 ),
@@ -1252,6 +1251,7 @@ class PriceService:
                     if (
                         token.isalpha()
                         and token not in generic_title_words
+                        and token not in candidate_code_words
                     )
                 ),
                 None,
