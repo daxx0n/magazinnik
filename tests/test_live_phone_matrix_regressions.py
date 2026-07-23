@@ -154,23 +154,13 @@ class NumericModelCodeFallbackTest(unittest.TestCase):
             )
         )
 
-    def test_different_family_memory_code_and_color_remain_rejected(self) -> None:
+    def test_different_family_memory_and_explicit_code_remain_rejected(self) -> None:
         cases = (
-            (
-                "Смартфон Huawei Mate 80 12GB/256GB (черный)",
-                "model_code",
-            ),
-            (
-                "Смартфон Huawei Pura 80 8GB/256GB (черный)",
-                "model_code",
-            ),
-            (
-                "Смартфон Huawei Pura 80 ABC-LX1 12GB/256GB (черный)",
-                "model_code",
-            ),
-            (PURA_80_WHITE, "model_code"),
+            "Смартфон Huawei Mate 80 12GB/256GB (черный)",
+            "Смартфон Huawei Pura 80 8GB/256GB (черный)",
+            "Смартфон Huawei Pura 80 ABC-LX1 12GB/256GB (черный)",
         )
-        for candidate, expected in cases:
+        for candidate in cases:
             with self.subTest(candidate=candidate):
                 self.assertFalse(
                     allows_omitted_model_code(PURA_80, candidate)
@@ -181,8 +171,21 @@ class NumericModelCodeFallbackTest(unittest.TestCase):
                         candidate_title=candidate,
                         requested_title=PURA_80,
                     ),
-                    expected,
+                    "model_code",
                 )
+
+    def test_color_is_checked_after_model_code_fallback(self) -> None:
+        self.assertTrue(
+            allows_omitted_model_code(PURA_80, PURA_80_WHITE)
+        )
+        self.assertEqual(
+            CatalogFirstPriceService._model_mismatch_reason(
+                canonical_title=PURA_80,
+                candidate_title=PURA_80_WHITE,
+                requested_title=PURA_80,
+            ),
+            "color",
+        )
 
 
 class LiveMatrixAggregateRegressionTest(unittest.IsolatedAsyncioTestCase):
