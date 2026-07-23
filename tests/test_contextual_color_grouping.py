@@ -41,17 +41,17 @@ class ContextualColorGroupingTest(unittest.TestCase):
         self.assertEqual([group.title for group in groups], ["Google Pixel 10a"])
         self.assertEqual(len(groups[0].products), 3)
 
-    def test_recognizes_exact_pixel_color_names(self) -> None:
+    def test_recognizes_pixel_color_families(self) -> None:
         expected = {
-            "нефрит": "jade",
-            "лунный камень": "moonstone",
-            "туман": "mist",
-            "лаванда": "lavender",
-            "фрост": "frost",
-            "лемонграсс": "lemongrass",
-            "индиго": "indigo",
-            "лесной орех": "hazel",
-            "ягода": "berry",
+            "нефрит": "green",
+            "лунный камень": "gray",
+            "туман": "gray",
+            "лаванда": "purple",
+            "фрост": "white",
+            "лемонграсс": "green",
+            "индиго": "blue",
+            "лесной орех": "brown",
+            "ягода": "pink",
         }
         for label, key in expected.items():
             with self.subTest(label=label):
