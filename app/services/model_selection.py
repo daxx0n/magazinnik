@@ -94,6 +94,22 @@ _COLOR_DESCRIPTOR_PATTERN = re.compile(
     r")$",
     re.IGNORECASE,
 )
+_NON_MODEL_NUMERIC_SUFFIXES = {
+    "bit",
+    "g",
+    "gb",
+    "hz",
+    "k",
+    "mah",
+    "mb",
+    "mp",
+    "nm",
+    "sim",
+    "tb",
+    "v",
+    "w",
+    "x",
+}
 
 
 def requested_color_key(value: str | None) -> str | None:
@@ -138,9 +154,7 @@ def explicit_color_mismatch(
     )
 
 
-def significant_model_numbers(value: str) -> set[str]:
-    """Извлекает номер поколения, исключая RAM и накопитель."""
-
+def _model_number_text(value: str) -> str:
     normalized = value.casefold().replace("ё", "е")
     normalized = re.sub(
         r"\bps\s*([45])\b",
@@ -155,13 +169,18 @@ def significant_model_numbers(value: str) -> set[str]:
         normalized,
         flags=re.IGNORECASE,
     )
-    normalized = re.sub(
+    return re.sub(
         r"\b\d+\s*(?:gb|tb|mb|гб|тб|мб)\b",
         " ",
         normalized,
         flags=re.IGNORECASE,
     )
 
+
+def significant_model_numbers(value: str) -> set[str]:
+    """Извлекает номер поколения, исключая RAM и накопитель."""
+
+    normalized = _model_number_text(value)
     return set(
         re.findall(
             r"(?<![a-zа-я0-9])\d{1,2}(?![a-zа-я0-9])",
@@ -170,22 +189,44 @@ def significant_model_numbers(value: str) -> set[str]:
     )
 
 
+def numeric_suffix_model_tokens(value: str) -> dict[str, set[str]]:
+    """Извлекает модели вида 40C, 8a, 16e, исключая единицы измерения."""
+
+    tokens: dict[str, set[str]] = {}
+    for base, suffix in re.findall(
+        r"(?<![a-zа-я0-9])(\d{1,3})([a-zа-я]{1,3})(?![a-zа-я0-9])",
+        _model_number_text(value),
+    ):
+        if suffix in _NON_MODEL_NUMERIC_SUFFIXES:
+            continue
+        tokens.setdefault(base, set()).add(base + suffix)
+    return tokens
+
+
+def numeric_suffix_model_mismatch(
+    reference_title: str,
+    candidate_title: str,
+) -> bool:
+    """Разделяет базовый номер и его буквенную модификацию."""
+
+    reference_numbers = significant_model_numbers(reference_title)
+    candidate_numbers = significant_model_numbers(candidate_title)
+    reference_suffixes = numeric_suffix_model_tokens(reference_title)
+    candidate_suffixes = numeric_suffix_model_tokens(candidate_title)
+
+    if any(base in reference_numbers for base in candidate_suffixes):
+        return True
+    if any(base in candidate_numbers for base in reference_suffixes):
+        return True
+
+    return any(
+        reference_suffixes[base].isdisjoint(candidate_suffixes[base])
+        for base in reference_suffixes.keys() & candidate_suffixes.keys()
+    )
+
+
 def _search_generation_numbers(value: str) -> set[str]:
-    normalized = value.casefold().replace("ё", "е")
-    normalized = re.sub(
-        r"(?<!\d)\d{1,4}\s*"
-        r"(?:gb|tb|mb|гб|тб|мб)?\s*/\s*"
-        r"\d{1,4}\s*(?:gb|tb|mb|гб|тб|мб)?(?!\w)",
-        " ",
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    normalized = re.sub(
-        r"\b\d+\s*(?:gb|tb|mb|гб|тб|мб)\b",
-        " ",
-        normalized,
-        flags=re.IGNORECASE,
-    )
+    normalized = _model_number_text(value)
     numbers = significant_model_numbers(value)
     numbers.update(
         re.findall(
@@ -222,9 +263,12 @@ def generation_mismatch(
     candidate_title: str,
     requested_title: str | None = None,
 ) -> bool:
-    """Не позволяет памяти кандидата маскировать другое поколение."""
+    """Разделяет поколения и буквенные модификации числовых моделей."""
 
     reference = requested_title or canonical_title
+    if numeric_suffix_model_mismatch(reference, candidate_title):
+        return True
+
     reference_numbers = significant_model_numbers(reference)
     candidate_numbers = significant_model_numbers(candidate_title)
 
