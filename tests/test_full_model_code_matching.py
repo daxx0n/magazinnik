@@ -60,13 +60,18 @@ class ExplicitFullModelCodeTest(unittest.TestCase):
         )
 
     def test_display_technology_prefix_does_not_replace_brand(self) -> None:
-        self.assertIsNone(
-            CatalogFirstPriceService._model_mismatch_reason(
-                canonical_title=CANONICAL,
-                candidate_title="MiniLED телевизор LG QNED AI QNED70 50QNED70B6C",
-                requested_title=CANONICAL,
-            )
-        )
+        for prefix in ("MiniLED", "Mini LED", "OLED", "QLED"):
+            with self.subTest(prefix=prefix):
+                self.assertIsNone(
+                    CatalogFirstPriceService._model_mismatch_reason(
+                        canonical_title=CANONICAL,
+                        candidate_title=(
+                            f"{prefix} телевизор LG QNED AI QNED70 "
+                            "50QNED70B6C"
+                        ),
+                        requested_title=CANONICAL,
+                    )
+                )
         self.assertEqual(
             CatalogFirstPriceService._model_mismatch_reason(
                 canonical_title=CANONICAL,
