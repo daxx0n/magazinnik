@@ -12,6 +12,7 @@ from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import ComparisonResult, SourceSearchStatus
 from app.services.catalog_service import CatalogService
+from app.services.model_code_matching import allows_omitted_model_code
 from app.services.model_selection import (
     color_neutral_title,
     explicit_color_mismatch,
@@ -217,6 +218,14 @@ class CatalogFirstPriceService(PriceService):
             candidate_title=model_only_title(candidate_title),
             requested_title=model_only_title(reference_title),
         )
+        if (
+            reason == "model_code"
+            and allows_omitted_model_code(
+                requested_title=reference_title,
+                candidate_title=candidate_title,
+            )
+        ):
+            reason = None
         if reason is not None:
             return reason
 
