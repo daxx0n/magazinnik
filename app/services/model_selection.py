@@ -112,6 +112,61 @@ _NON_MODEL_NUMERIC_SUFFIXES = {
 }
 
 
+_MODEL_VERSION_ALIASES = {
+    "pro": "pro",
+    "про": "pro",
+    "max": "max",
+    "макс": "max",
+    "plus": "plus",
+    "плюс": "plus",
+    "ultra": "ultra",
+    "ультра": "ultra",
+    "air": "air",
+    "эйр": "air",
+    "mini": "mini",
+    "мини": "mini",
+    "lite": "lite",
+    "light": "lite",
+    "лайт": "lite",
+    "xl": "xl",
+    "fe": "fe",
+    "e": "e",
+}
+_LIGHT_COLOR_WORDS = (
+    "black|blue|green|gray|grey|pink|purple|red|white|yellow|"
+    "gold|golden|silver|черн\w*|син\w*|голуб\w*|зелен\w*|"
+    "сер\w*|розов\w*|фиолет\w*|красн\w*|бел\w*|желт\w*|"
+    "золот\w*|серебр\w*"
+)
+
+
+def model_version_signature(value: str | None) -> frozenset[str]:
+    """Returns canonical material model-tier markers across languages.
+
+    Examples: Lite/Light/Лайт map to ``lite`` and Mini/Мини map to
+    ``mini``. Display technology (MiniLED) and color phrases such as
+    ``Light Blue`` are excluded so they do not become model variants.
+    """
+
+    if not value:
+        return frozenset()
+
+    normalized = color_neutral_title(value).casefold().replace("ё", "е")
+    normalized = re.sub(r"\bmini[\s-]*led\b", " ", normalized)
+    normalized = re.sub(
+        rf"\blight\s+(?:{_LIGHT_COLOR_WORDS})\b",
+        " ",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    tokens = re.findall(r"[a-zа-я]+|\d+", normalized)
+    return frozenset(
+        _MODEL_VERSION_ALIASES[token]
+        for token in tokens
+        if token in _MODEL_VERSION_ALIASES
+    )
+
+
 def requested_color_key(value: str | None) -> str | None:
     """Определяет нормализованный цвет карточки или пользовательского ввода."""
 
