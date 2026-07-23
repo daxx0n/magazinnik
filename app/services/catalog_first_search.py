@@ -12,7 +12,10 @@ from app.models.offer import ProductOffer
 from app.models.product import ProductCandidate
 from app.models.search_result import ComparisonResult, SourceSearchStatus
 from app.services.catalog_service import CatalogService
-from app.services.model_code_matching import allows_omitted_model_code
+from app.services.model_code_matching import (
+    allows_omitted_model_code,
+    explicit_model_code_mismatch,
+)
 from app.services.model_selection import (
     color_neutral_title,
     explicit_color_mismatch,
@@ -205,6 +208,11 @@ class CatalogFirstPriceService(PriceService):
             requested_title=reference_title,
         ):
             return "model_number"
+        if explicit_model_code_mismatch(
+            requested_title=reference_title,
+            candidate_title=candidate_title,
+        ):
+            return "model_code"
 
         reference_color = requested_color_key(reference_title)
         candidate_color = requested_color_key(candidate_title)
