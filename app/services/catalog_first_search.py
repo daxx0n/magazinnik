@@ -15,7 +15,6 @@ from app.services.catalog_service import CatalogService
 from app.services.model_selection import (
     color_neutral_title,
     explicit_color_mismatch,
-    filter_products_by_query_generation,
     generation_mismatch,
     requested_color_key,
 )
@@ -67,11 +66,10 @@ class CatalogFirstPriceService(PriceService):
         query: str,
         category: str | None = None,
     ) -> list[ProductCandidate]:
-        """Возвращает варианты выбранного поколения для модели и цвета."""
+        """Возвращает все варианты для последующего выбора модели и цвета."""
 
         if not self._catalog_search_enabled or category is not None:
-            candidates = await super().find_onliner_products(query, category)
-            return filter_products_by_query_generation(candidates, query)
+            return await super().find_onliner_products(query, category)
 
         try:
             products = self._catalog_service.search(query)
@@ -83,7 +81,6 @@ class CatalogFirstPriceService(PriceService):
                 for product in products
                 if (candidate := self._candidate_from_product(product)) is not None
             ]
-            candidates = filter_products_by_query_generation(candidates, query)
             if candidates:
                 for candidate in candidates:
                     self._remember_catalog_query(candidate.key, query)
@@ -94,8 +91,7 @@ class CatalogFirstPriceService(PriceService):
                 )
                 return candidates
 
-        candidates = await super().find_onliner_products(query, category)
-        return filter_products_by_query_generation(candidates, query)
+        return await super().find_onliner_products(query, category)
 
     async def search_all_sources_by_onliner_key(
         self,
