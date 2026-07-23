@@ -65,7 +65,7 @@ class SearchPresentationContractTest(unittest.TestCase):
         group_source = inspect.getsource(search.handle_variant_group)
         any_color_source = inspect.getsource(search.handle_any_color_selection)
 
-        self.assertIn('raw_memory_index}:all', group_source)
+        self.assertIn('any_callback=f"ola:{search_id}:{group_index}:all"', group_source)
         self.assertIn("memory_selected=False", group_source)
         self.assertIn('raw_memory_index == "all"', any_color_source)
 
