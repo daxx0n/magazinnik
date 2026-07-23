@@ -82,6 +82,14 @@ _COLOR_ALIAS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
 )
+_EXACT_SELECTION_COLOR_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "isai_blue",
+        re.compile(r"\bisai[-\s]+blue\b", re.IGNORECASE),
+    ),
+)
 _COLOR_DESCRIPTOR_PATTERN = re.compile(
     r"^(?:"
     r"natural|desert|space|cloud|mist|sky|rose|cosmic|matte|"
@@ -97,10 +105,18 @@ _COLOR_DESCRIPTOR_PATTERN = re.compile(
 
 
 def requested_color_key(value: str | None) -> str | None:
-    """Определяет нормализованный цвет карточки или пользовательского ввода."""
+    """Определяет точный цвет карточки или пользовательского ввода."""
 
     if not value:
         return None
+
+    identity = extract_color_identity(value)
+    if identity is not None and identity.confidence == EXACT_VARIANT:
+        return identity.variant
+
+    for color_key, pattern in _EXACT_SELECTION_COLOR_PATTERNS:
+        if pattern.search(value):
+            return color_key
 
     known_key = extract_color_key(value)
     if known_key is not None:
@@ -116,7 +132,7 @@ def explicit_color_mismatch(
     requested_title: str | None,
     candidate_title: str,
 ) -> bool:
-    """Разделяет разные exact-variant, сохраняя общий цвет как fallback."""
+    """Разделяет exact-variant, сохраняя общий цвет как fallback."""
 
     requested_identity = extract_color_identity(requested_title)
     candidate_identity = extract_color_identity(candidate_title)
@@ -129,6 +145,7 @@ def explicit_color_mismatch(
             return True
         if candidate_identity.confidence == EXACT_VARIANT:
             return requested_identity.variant != candidate_identity.variant
+        return requested_identity.family != candidate_identity.family
 
     requested_color = requested_color_key(requested_title)
     candidate_color = requested_color_key(candidate_title)
@@ -162,12 +179,40 @@ def significant_model_numbers(value: str) -> set[str]:
         flags=re.IGNORECASE,
     )
 
-    return set(
+    numbers = set(
         re.findall(
             r"(?<![a-zа-я0-9])\d{1,2}(?![a-zа-я0-9])",
             normalized,
         )
     )
+    numbers.update(
+        re.findall(
+            r"(?<![a-zа-я0-9])(\d{1,2})(?=[a-zа-я]\b)",
+            normalized,
+        )
+    )
+    return numbers
+
+
+def filter_products_by_query_generation(
+    products: Iterable[ProductCandidate],
+    query: str,
+) -> list[ProductCandidate]:
+    """Оставляет выбранное поколение, но не обнуляет поиск при неточном вводе."""
+
+    product_list = list(products)
+    requested_numbers = significant_model_numbers(query)
+    if not requested_numbers:
+        return product_list
+
+    matching = [
+        product
+        for product in product_list
+        if requested_numbers.issubset(
+            significant_model_numbers(product.title)
+        )
+    ]
+    return matching or product_list
 
 
 def generation_mismatch(
