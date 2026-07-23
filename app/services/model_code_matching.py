@@ -163,6 +163,18 @@ def explicit_model_code_mismatch(
     )
 
 
+def technical_model_code_words(value: str) -> set[str]:
+    """Returns alphabetic fragments that belong to separated model codes.
+
+    Store titles often put a code such as YNDX-00028 or GFY-LX1 before or
+    immediately after the real brand. Those fragments must not be interpreted
+    as a manufacturer name during brand matching.
+    """
+
+    _, parts = _separated_long_codes(_normalize(value))
+    return {part for part in parts if part.isalpha()}
+
+
 def short_marketing_model_codes(value: str) -> set[str]:
     """Returns compact marketing model tokens such as Y63, A55, or S24."""
 
