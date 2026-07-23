@@ -37,7 +37,7 @@ class VariantMatchingProductionTest(unittest.TestCase):
                     )
                 )
 
-    def test_rejects_memory_region_sim_and_device_configuration(self) -> None:
+    def test_production_matcher_rejects_material_variant_differences(self) -> None:
         cases = [
             (
                 "Apple iPhone 17 Pro 256GB",
@@ -64,6 +64,26 @@ class VariantMatchingProductionTest(unittest.TestCase):
                 "Sony PlayStation 5 Slim с дисководом",
                 "configuration",
             ),
+            (
+                "Apple AirPods Pro 2 Lightning",
+                "Apple AirPods Pro 2 USB Type-C",
+                "configuration",
+            ),
+            (
+                "Roborock Q8 Max с русской озвучкой",
+                "Roborock Q8 Max с английской озвучкой",
+                "configuration",
+            ),
+            (
+                "Apple iPhone 17 Pro 256GB",
+                "Apple iPhone 17 Pro 256GB Open Box",
+                "condition",
+            ),
+            (
+                "Sony PlayStation 5 Slim + DualSense",
+                "Sony PlayStation 5 Slim + Headset",
+                "bundle",
+            ),
         ]
         for canonical, candidate, expected in cases:
             with self.subTest(canonical=canonical, candidate=candidate):
@@ -75,16 +95,6 @@ class VariantMatchingProductionTest(unittest.TestCase):
                     ),
                     expected,
                 )
-
-    def test_rejects_connector_difference(self) -> None:
-        self.assertEqual(
-            CatalogFirstPriceService._model_mismatch_reason(
-                "Apple AirPods Pro 2 Lightning",
-                "Apple AirPods Pro 2 USB Type-C",
-                requested_title="Apple AirPods Pro 2 Lightning",
-            ),
-            "configuration",
-        )
 
 
 if __name__ == "__main__":
