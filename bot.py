@@ -77,6 +77,7 @@ async def main() -> None:
             "Бот запущен. "
             "Для остановки нажми Control + C."
         )
+
         await dispatcher.start_polling(bot)
     finally:
         for task in background_tasks:
