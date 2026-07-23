@@ -1,3 +1,5 @@
+import json
+import os
 import unittest
 
 from app.services.catalog_first_search import CatalogFirstPriceService
@@ -12,18 +14,21 @@ class LiveTwentyOneVekY63Diagnostic(unittest.IsolatedAsyncioTestCase):
             limit=100,
         )
         rows = [
-            (
-                offer.title,
-                CatalogFirstPriceService._model_mismatch_reason(
+            {
+                "title": offer.title,
+                "reason": CatalogFirstPriceService._model_mismatch_reason(
                     canonical_title=canonical,
                     candidate_title=offer.title,
                     requested_title=canonical,
                 ),
-                offer.url,
-            )
+                "url": offer.url,
+            }
             for offer in offers
         ]
-        self.fail(f"LIVE_21VEK_Y63={rows!r}")
+        os.makedirs("diagnostic", exist_ok=True)
+        with open("diagnostic/21vek-y63.json", "w", encoding="utf-8") as file:
+            json.dump(rows, file, ensure_ascii=False, indent=2)
+        self.assertTrue(rows)
 
 
 if __name__ == "__main__":
