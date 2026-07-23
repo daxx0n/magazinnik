@@ -72,12 +72,7 @@ class ContextualColorGroupingTest(unittest.TestCase):
         self.assertEqual(len(groups), 4)
         self.assertEqual(
             {group.title for group in groups},
-            {
-                "Tablet X (Wi-Fi)",
-                "Tablet X (LTE)",
-                "Phone Y (Global)",
-                "Phone Y (China)",
-            },
+            {"Tablet X (Wi-Fi)", "Tablet X (LTE)", "Phone Y (Global)", "Phone Y (China)"},
         )
 
     def test_contextually_groups_unknown_color_like_suffixes(self) -> None:
