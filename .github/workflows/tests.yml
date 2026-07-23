@@ -28,23 +28,23 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Run focused Station Light live check
+      - name: Run Station Light production aggregate
         shell: bash
         run: |
           set +e
-          PYTHONPATH=. python scripts/live_station_light_sources.py > station-light-output.json 2>&1
+          PYTHONPATH=. python scripts/live_station_light_aggregate.py > station-light-aggregate.json 2>&1
           echo $? > station-light-status.txt
           exit 0
 
-      - name: Upload Station Light live result
+      - name: Upload Station Light aggregate result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: station-light-live-after-fix
+          name: station-light-aggregate-after-fix
           path: |
-            station-light-output.json
+            station-light-aggregate.json
             station-light-status.txt
 
-      - name: Propagate live status
+      - name: Propagate aggregate status
         shell: bash
         run: exit "$(cat station-light-status.txt)"
