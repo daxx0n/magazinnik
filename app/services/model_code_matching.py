@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import re
 
-from app.services.variant_matching import memory_signature
+from app.services.model_selection import (
+    color_neutral_title,
+    significant_model_numbers,
+)
+from app.services.variant_matching import (
+    memory_signature,
+    neutralize_variant_markers,
+)
 
 
 _SEPARATED_CODE_RE = re.compile(
@@ -27,6 +34,19 @@ _IGNORED_SHORT_CODES = {
     "5g",
     "esim",
     "lte",
+}
+_GENERIC_PRODUCT_WORDS = {
+    "cellphone",
+    "device",
+    "mobile",
+    "phone",
+    "smartphone",
+    "telephone",
+    "аппарат",
+    "мобильный",
+    "смартфон",
+    "телефон",
+    "устройство",
 }
 
 
@@ -98,15 +118,49 @@ def short_marketing_model_codes(value: str) -> set[str]:
     return result
 
 
+def marketing_identity_words(value: str) -> tuple[str, ...]:
+    """Returns ordered brand/family words after removing variants and codes."""
+
+    neutral = neutralize_variant_markers(color_neutral_title(value))
+    normalized = _normalize(neutral)
+    _, long_code_parts = _separated_long_codes(normalized)
+
+    return tuple(
+        token
+        for token in re.findall(r"[a-zа-я]+", normalized)
+        if (
+            len(token) >= 2
+            and token not in _GENERIC_PRODUCT_WORDS
+            and token not in long_code_parts
+        )
+    )
+
+
+def _compatible_identity_words(
+    requested_words: tuple[str, ...],
+    candidate_words: tuple[str, ...],
+) -> bool:
+    if not requested_words or not candidate_words:
+        return False
+    if requested_words == candidate_words:
+        return True
+
+    shorter, longer = sorted(
+        (requested_words, candidate_words),
+        key=len,
+    )
+    return len(longer) == len(shorter) + 1 and longer[1:] == shorter
+
+
 def allows_omitted_model_code(
     requested_title: str,
     candidate_title: str,
 ) -> bool:
-    """Allows a missing long code only with exact memory and short model token.
+    """Allows a missing long code only with exact model identity and memory.
 
-    A candidate with another explicit long code is never accepted by this
-    fallback. This keeps conflicting regional or hardware codes strict while
-    allowing retailers that publish only the marketing model name.
+    A candidate with another explicit long code is never accepted. Alphanumeric
+    marketing models are compared directly; numeric-only models require the
+    same generation and the same ordered brand/family identity words.
     """
 
     requested_long_codes = explicit_long_model_codes(requested_title)
@@ -125,8 +179,18 @@ def allows_omitted_model_code(
 
     requested_short_codes = short_marketing_model_codes(requested_title)
     candidate_short_codes = short_marketing_model_codes(candidate_title)
+    if requested_short_codes:
+        return requested_short_codes.issubset(candidate_short_codes)
 
-    return bool(
-        requested_short_codes
-        and requested_short_codes.issubset(candidate_short_codes)
+    requested_numbers = significant_model_numbers(requested_title)
+    candidate_numbers = significant_model_numbers(candidate_title)
+    if (
+        not requested_numbers
+        or requested_numbers != candidate_numbers
+    ):
+        return False
+
+    return _compatible_identity_words(
+        marketing_identity_words(requested_title),
+        marketing_identity_words(candidate_title),
     )
