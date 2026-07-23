@@ -68,6 +68,10 @@ class VariantMatchingTest(unittest.TestCase):
         )
         self.assertIsNone(variant_mismatch_reason("Tablet", "Tablet 5G"))
 
+    def test_sim_and_cellular_plus_signs_are_not_bundles(self) -> None:
+        self.assertIsNone(bundle_identity("Phone nano-SIM + eSIM"))
+        self.assertIsNone(bundle_identity("Watch GPS + Cellular"))
+
     def test_condition_and_bundle_content_are_material_variants(self) -> None:
         self.assertEqual(product_condition("Phone Open Box"), "open_box")
         self.assertEqual(product_condition("Phone витринный образец"), "open_box")
