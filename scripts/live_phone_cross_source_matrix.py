@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Iterable
 
 from app.models.product import ProductCandidate
@@ -63,7 +64,14 @@ CASES = (
 
 class NoopCatalogService:
     async def ingest_offers_with_report_async(self, offers: Iterable[object]):
-        return None
+        items = list(offers)
+        return SimpleNamespace(
+            total_offers=len(items),
+            created_products=0,
+            merged_offers=0,
+            updated_offers=0,
+            product_keys=(),
+        )
 
 
 def normalize(value: str) -> str:
