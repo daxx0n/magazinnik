@@ -34,6 +34,7 @@ from app.sources.twenty_one_vek import (
 from app.sources.zeon import ZeonSource
 from app.services.catalog_service import CatalogService
 from app.services.model_code_matching import technical_model_code_words
+from app.services.model_selection import model_version_signature
 from app.services.product_variants import (
     display_color,
     extract_color,
@@ -1822,32 +1823,6 @@ class PriceService:
         ) != sim_configuration(candidate_title):
             return "sim"
 
-        def version_tokens(value: str) -> set[str]:
-            value = re.sub(
-                r"\be\s+sim\b",
-                " ",
-                value,
-            )
-            tokens = set(
-                re.findall(
-                    r"[a-zа-я]+|\d+",
-                    value,
-                )
-            )
-            markers = {
-                "pro",
-                "max",
-                "plus",
-                "ultra",
-                "air",
-                "mini",
-                "lite",
-                "xl",
-                "fe",
-                "e",
-            }
-            return tokens & markers
-
         def has_model_plus(value: str) -> bool:
             """Отличает Max/Pro от Max+/Pro+ без путаницы с bundle."""
 
@@ -1877,8 +1852,8 @@ class PriceService:
             return "version"
 
         if (
-            version_tokens(canonical)
-            != version_tokens(candidate)
+            model_version_signature(canonical)
+            != model_version_signature(candidate)
         ):
             return "version"
 
