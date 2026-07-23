@@ -38,6 +38,20 @@ class ModelVersionSignatureTest(unittest.TestCase):
             frozenset(),
         )
 
+    def test_esim_is_not_tier_e_but_compact_model_suffix_is(self) -> None:
+        self.assertEqual(
+            model_version_signature("Apple iPhone 16 e SIM"),
+            frozenset(),
+        )
+        self.assertEqual(
+            model_version_signature("Apple iPhone 16 eSIM"),
+            frozenset(),
+        )
+        self.assertEqual(
+            model_version_signature("Apple iPhone 16e"),
+            frozenset({"e"}),
+        )
+
 
 class CrossSourceMiniLightRegressionTest(unittest.TestCase):
     def setUp(self) -> None:
