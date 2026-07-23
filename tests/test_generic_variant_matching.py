@@ -98,13 +98,60 @@ class GenericVariantMatchingTest(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertEqual(selected_color_label(title), expected)
 
-    def test_rejects_other_generation_before_color(self) -> None:
-        reason = CatalogFirstPriceService._model_mismatch_reason(
-            "Google Pixel 8 8GB/128GB Mint",
-            "Google Pixel 7 8GB/128GB Hazel",
-            requested_title="Google Pixel 8 8GB/128GB Mint",
-        )
-        self.assertEqual(reason, "model_number")
+    def test_rejects_other_generation_for_any_brand(self) -> None:
+        cases = [
+            (
+                "Samsung Galaxy S25 12GB/256GB Navy",
+                "Samsung Galaxy S24 12GB/256GB Navy",
+            ),
+            (
+                "Apple iPhone 16 256GB Black",
+                "Apple iPhone 15 256GB Black",
+            ),
+            (
+                "Sony PlayStation 5 Slim White",
+                "Sony PlayStation 4 Slim White",
+            ),
+            (
+                "Google Pixel 8 8GB/128GB Mint",
+                "Google Pixel 7 8GB/128GB Hazel",
+            ),
+        ]
+        for canonical, other in cases:
+            with self.subTest(canonical=canonical):
+                reason = CatalogFirstPriceService._model_mismatch_reason(
+                    canonical,
+                    other,
+                    requested_title=canonical,
+                )
+                self.assertEqual(reason, "model_number")
+
+    def test_rejects_real_variant_differences(self) -> None:
+        cases = [
+            (
+                "Apple iPhone 15 Pro 256GB Black",
+                "Apple iPhone 15 Plus 256GB Black",
+                "version",
+            ),
+            (
+                "Samsung Galaxy S25 12GB/256GB Navy",
+                "Samsung Galaxy S25 12GB/128GB Navy",
+                "memory",
+            ),
+            (
+                "Lenovo Legion 5 16GB/512GB Storm Grey",
+                "Lenovo Legion 5 16GB/512GB Glacier White",
+                "color",
+            ),
+        ]
+        for canonical, other, expected in cases:
+            with self.subTest(canonical=canonical):
+                reason = CatalogFirstPriceService._model_mismatch_reason(
+                    canonical,
+                    other,
+                    requested_title=canonical,
+                )
+                self.assertEqual(reason, expected)
 
     def test_rejects_exact_marketing_variant_differences(self) -> None:
         cases = [
@@ -140,7 +187,7 @@ class GenericVariantMatchingTest(unittest.TestCase):
                     "color",
                 )
 
-    def test_accepts_confirmed_aliases_and_base_color_fallback(self) -> None:
+    def test_accepts_same_product_with_different_store_wording(self) -> None:
         cases = [
             (
                 "Google Pixel 8 8GB/128GB Obsidian",
@@ -149,6 +196,10 @@ class GenericVariantMatchingTest(unittest.TestCase):
             (
                 "Google Pixel 8 8GB/128GB Obsidian",
                 "Телефон Google Pixel 8 8/128 ГБ черный",
+            ),
+            (
+                "Bosch HBA-534-EB3 Black",
+                "Духовой шкаф Bosch HBA534EB3 черный",
             ),
             (
                 "Samsung Galaxy S25 12GB/256GB Navy",
@@ -161,13 +212,12 @@ class GenericVariantMatchingTest(unittest.TestCase):
         ]
         for canonical, candidate_title in cases:
             with self.subTest(canonical=canonical):
-                self.assertIsNone(
-                    CatalogFirstPriceService._model_mismatch_reason(
-                        canonical,
-                        candidate_title,
-                        requested_title=canonical,
-                    )
+                reason = CatalogFirstPriceService._model_mismatch_reason(
+                    canonical,
+                    candidate_title,
+                    requested_title=canonical,
                 )
+                self.assertIsNone(reason)
 
 
 if __name__ == "__main__":
