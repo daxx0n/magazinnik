@@ -3,34 +3,120 @@ from collections.abc import Iterable
 
 from app.models.product import ProductCandidate
 from app.services.color_normalizer import (
-    UNKNOWN,
     color_identities_match,
     extract_color_identity,
-    extract_color_phrase,
 )
 from app.services.product_variants import (
     ProductVariantGroup,
     base_product_title,
     display_color,
+    extract_color,
+    extract_color_key,
+    extract_memory,
+)
+
+
+_COLOR_ALIAS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "white",
+        re.compile(
+            r"\b(?:snow|снег\w*|porcelain|фарфор\w*|"
+            r"cloud\s+white|frost|фрост\w*|white|бел\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "black",
+        re.compile(
+            r"\b(?:obsidian|обсидиан\w*|charcoal|"
+            r"space\s+black|black|черн\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "green",
+        re.compile(
+            r"\b(?:hazel|lemongrass|forest\s+hazel|jade|mint|sage|green|"
+            r"нефрит\w*|лемонграсс\w*|лесн\w*\s+орех\w*|"
+            r"мятн\w*|зелен\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "blue",
+        re.compile(
+            r"\b(?:bay|blue|navy|indigo|индиго\w*|голуб\w*|син\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "pink",
+        re.compile(
+            r"\b(?:peony|rose|berry|pink|ягод\w*|розов\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "gray",
+        re.compile(
+            r"\b(?:graphite|moonstone|mist|fog|gray|grey|"
+            r"лунн\w*\s+камень|туман\w*|сер(?:ый|ая|ое|ые)|"
+            r"графитов\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "yellow",
+        re.compile(r"\b(?:yellow|желт\w*)\b", re.IGNORECASE),
+    ),
+    (
+        "red",
+        re.compile(r"\b(?:red|красн\w*)\b", re.IGNORECASE),
+    ),
+    (
+        "purple",
+        re.compile(
+            r"\b(?:lavender|lilac|purple|лаванд\w*|сирен\w*|"
+            r"лилов\w*|фиолет\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
+_COLOR_DESCRIPTOR_PATTERN = re.compile(
+    r"^(?:"
+    r"natural|desert|space|cloud|mist|sky|rose|cosmic|matte|"
+    r"storm|glacier|phantom|awesome|bora|icy|deep|dark|light|"
+    r"black|white|blue|green|gold|silver|titanium|graphite|"
+    r"природн\w*|пустынн\w*|космическ\w*|матов\w*|"
+    r"темн\w*|светл\w*|глубок\w*|ледян\w*|"
+    r"черн\w*|бел\w*|син\w*|зелен\w*|золот\w*|"
+    r"серебр\w*|титан\w*|графитов\w*"
+    r")$",
+    re.IGNORECASE,
 )
 
 
 def requested_color_key(value: str | None) -> str | None:
-    """Returns a backward-compatible family key for UI and diagnostics."""
+    """Определяет нормализованный цвет карточки или пользовательского ввода."""
 
-    identity = extract_color_identity(value)
-    if identity is None:
+    if not value:
         return None
-    if identity.confidence == UNKNOWN:
-        return identity.variant
-    return identity.family
+
+    known_key = extract_color_key(value)
+    if known_key is not None:
+        return known_key
+
+    for color_key, pattern in _COLOR_ALIAS_PATTERNS:
+        if pattern.search(value):
+            return color_key
+    return None
 
 
 def explicit_color_mismatch(
     requested_title: str | None,
     candidate_title: str,
 ) -> bool:
-    """Strictly checks an explicitly selected trailing color variant."""
+    """Строго проверяет выбранный exact-variant в production matching."""
 
     requested_color = extract_color_identity(requested_title)
     if requested_color is None:
@@ -197,8 +283,22 @@ def selected_color_label(title: str) -> str | None:
     if known_label is not None:
         return known_label
 
-    phrase = extract_color_phrase(title)
-    return _display_suffix(phrase) if phrase is not None else None
+    trailing = re.search(r"\(([^()]*)\)\s*$", title)
+    if (
+        trailing is not None
+        and requested_color_key(trailing.group(1)) is not None
+    ):
+        return _display_suffix(trailing.group(1))
+
+    suffix = _color_suffix(title)
+    if suffix is not None:
+        return _display_suffix(suffix)
+
+    for _, pattern in _COLOR_ALIAS_PATTERNS:
+        match = pattern.search(title)
+        if match is not None:
+            return _display_suffix(match.group(0))
+    return None
 
 
 def collapse_color_variants(
@@ -231,7 +331,7 @@ def _strip_color_suffix(title: str) -> str:
     trailing = re.search(r"\s*\(([^()]*)\)\s*$", result)
     if (
         trailing is not None
-        and extract_color_identity(trailing.group(1)) is not None
+        and requested_color_key(trailing.group(1)) is not None
     ):
         return result[:trailing.start()].strip(" -/,")
 
@@ -244,9 +344,44 @@ def _strip_color_suffix(title: str) -> str:
 
 
 def _color_suffix(title: str) -> str | None:
-    """Находит только явную конечную цветовую фразу."""
+    """Находит конечную цветовую фразу, не принимая Pro/Plus за цвет."""
 
-    return extract_color_phrase(title)
+    full_color = requested_color_key(title)
+    if full_color is None:
+        return None
+
+    tokens = title.split()
+    if not tokens:
+        return None
+
+    last_token = tokens[-1].strip("()[]{}.,;:-_/ ")
+    if not last_token or requested_color_key(last_token) is None:
+        return None
+
+    max_width = min(4, len(tokens) - 1)
+    for width in range(1, max_width + 1):
+        raw_suffix = " ".join(tokens[-width:])
+        suffix = raw_suffix.strip("()[]{}.,;:-_/ ")
+        if not suffix or any(character.isdigit() for character in suffix):
+            continue
+        if requested_color_key(suffix) != full_color:
+            continue
+
+        start = len(tokens) - width
+        while start > 0:
+            previous = tokens[start - 1].strip("()[]{}.,;:-_/ ")
+            if (
+                not previous
+                or any(character.isdigit() for character in previous)
+                or _COLOR_DESCRIPTOR_PATTERN.fullmatch(previous) is None
+            ):
+                break
+            expanded = " ".join(tokens[start - 1:])
+            if requested_color_key(expanded) != full_color:
+                break
+            start -= 1
+        return " ".join(tokens[start:])
+    return None
 
 
 def _display_suffix(value: str) -> str:
