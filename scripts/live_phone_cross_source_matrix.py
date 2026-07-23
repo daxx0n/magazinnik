@@ -59,6 +59,50 @@ CASES = (
         model_pattern=r"\bgoogle\b.*\bpixel\b.*\b9\b",
         forbidden_tokens=("9a", "fold", "pro", "xl"),
     ),
+    PhoneCase(
+        name="samsung_galaxy_a17_8_256",
+        query="Samsung Galaxy A17 8GB/256GB",
+        model_pattern=r"\bsamsung\b.*\bgalaxy\b.*\ba17\b",
+    ),
+    PhoneCase(
+        name="samsung_galaxy_a56_8_256",
+        query="Samsung Galaxy A56 8GB/256GB",
+        model_pattern=r"\bsamsung\b.*\bgalaxy\b.*\ba56\b",
+    ),
+    PhoneCase(
+        name="apple_iphone_17_256",
+        query="Apple iPhone 17 256GB",
+        model_pattern=r"\b(?:apple\s+)?iphone\b.*\b17\b",
+        forbidden_tokens=("air", "plus", "pro", "max"),
+    ),
+    PhoneCase(
+        name="xiaomi_redmi_15c_4_128",
+        query="Xiaomi Redmi 15C 4GB/128GB",
+        model_pattern=r"\b(?:xiaomi\s+)?redmi\b.*\b15c\b",
+    ),
+    PhoneCase(
+        name="honor_x6c_6_256",
+        query="Honor X6c 6GB/256GB",
+        model_pattern=r"\bhonor\b.*\bx6c\b",
+    ),
+    PhoneCase(
+        name="tecno_spark_40_8_256",
+        query="Tecno Spark 40 8GB/256GB",
+        model_pattern=r"\btecno\b.*\bspark\b.*\b40\b",
+        forbidden_tokens=("40c", "pro"),
+    ),
+    PhoneCase(
+        name="huawei_pura_80_12_256",
+        query="Huawei Pura 80 12GB/256GB",
+        model_pattern=r"\bhuawei\b.*\bpura\b.*\b80\b",
+        forbidden_tokens=("pro", "ultra"),
+    ),
+    PhoneCase(
+        name="google_pixel_8_8_256",
+        query="Google Pixel 8 8GB/256GB",
+        model_pattern=r"\bgoogle\b.*\bpixel\b.*\b8\b",
+        forbidden_tokens=("8a", "pro"),
+    ),
 )
 
 
@@ -100,13 +144,18 @@ def matching_candidates(
 
 
 def result_summary(case: PhoneCase, candidate: ProductCandidate, result) -> dict:
-    reasons_by_source: dict[str, list[str]] = {}
-    titles_by_source: dict[str, list[str]] = {}
+    accepted_by_source: dict[str, list[str]] = {}
+    rejected_reasons: dict[str, list[str]] = {}
+    rejected_titles: dict[str, list[str]] = {}
+
     for decision in result.match_decisions:
         if decision.accepted:
+            accepted_by_source.setdefault(decision.source, []).append(
+                decision.title
+            )
             continue
-        reasons_by_source.setdefault(decision.source, []).append(decision.reason)
-        titles_by_source.setdefault(decision.source, []).append(decision.title)
+        rejected_reasons.setdefault(decision.source, []).append(decision.reason)
+        rejected_titles.setdefault(decision.source, []).append(decision.title)
 
     return {
         "case": case.name,
@@ -129,12 +178,16 @@ def result_summary(case: PhoneCase, candidate: ProductCandidate, result) -> dict
             }
             for status in result.source_statuses
         },
+        "accepted_titles": {
+            source: titles[:8]
+            for source, titles in accepted_by_source.items()
+        },
         "rejections": {
             source: {
                 "reasons": sorted(set(reasons)),
-                "titles": titles_by_source.get(source, [])[:5],
+                "titles": rejected_titles.get(source, [])[:5],
             }
-            for source, reasons in reasons_by_source.items()
+            for source, reasons in rejected_reasons.items()
         },
     }
 
