@@ -133,10 +133,10 @@ _MODEL_VERSION_ALIASES = {
     "e": "e",
 }
 _LIGHT_COLOR_WORDS = (
-    "black|blue|green|gray|grey|pink|purple|red|white|yellow|"
-    "gold|golden|silver|черн\w*|син\w*|голуб\w*|зелен\w*|"
-    "сер\w*|розов\w*|фиолет\w*|красн\w*|бел\w*|желт\w*|"
-    "золот\w*|серебр\w*"
+    r"black|blue|green|gray|grey|pink|purple|red|white|yellow|"
+    r"gold|golden|silver|черн\w*|син\w*|голуб\w*|зелен\w*|"
+    r"сер\w*|розов\w*|фиолет\w*|красн\w*|бел\w*|желт\w*|"
+    r"золот\w*|серебр\w*"
 )
 
 
