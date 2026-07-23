@@ -49,38 +49,47 @@ class ColorMatchingProductionTest(unittest.IsolatedAsyncioTestCase):
             (
                 "Google Pixel 8 8GB/128GB (Mint)",
                 "Google Pixel 8 8GB/128GB (Hazel)",
+                "color",
             ),
             (
                 "Google Pixel 8 8GB/128GB (Mint)",
                 "Google Pixel 8 8GB/128GB (лесной орех)",
+                "color",
             ),
             (
                 "Google Pixel 8 8GB/128GB (Mint)",
                 "Google Pixel 8 8GB/128GB (Obsidian)",
+                "color",
             ),
             (
                 "Google Pixel 10 12GB/256GB Jade",
                 "Google Pixel 10 12GB/256GB Moonstone",
+                "color",
             ),
             (
                 "Apple iPhone 15 Pro Natural Titanium",
                 "Apple iPhone 15 Pro Blue Titanium",
+                "color",
             ),
             (
                 "Apple iPhone 15 Pro Black Titanium",
                 "Apple iPhone 15 Pro White Titanium",
+                "color",
             ),
             (
                 "Samsung Galaxy S24 Ultra Titanium Gray",
                 "Samsung Galaxy S24 Ultra Titanium Black",
+                "color",
             ),
             (
                 "Samsung Galaxy S25 Mint",
                 "Samsung Galaxy S25 Jade Green",
+                "color",
             ),
             (
                 "Xiaomi 15 Midnight Black",
                 "Xiaomi 15 Aurora Glow",
+                "color_unknown",
             ),
         ]
 
@@ -93,7 +102,7 @@ class ColorMatchingProductionTest(unittest.IsolatedAsyncioTestCase):
                         requested_title=canonical,
                     )
                 )
-        for canonical, candidate in rejected:
+        for canonical, candidate, reason in rejected:
             with self.subTest(kind="rejected", canonical=canonical):
                 self.assertEqual(
                     CatalogFirstPriceService._model_mismatch_reason(
@@ -101,7 +110,7 @@ class ColorMatchingProductionTest(unittest.IsolatedAsyncioTestCase):
                         candidate,
                         requested_title=canonical,
                     ),
-                    "color",
+                    reason,
                 )
 
     def test_no_selected_color_does_not_filter_candidates(self) -> None:
