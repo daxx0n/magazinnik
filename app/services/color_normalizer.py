@@ -61,6 +61,11 @@ _VARIANT_ALIASES: dict[str, tuple[str, set[str]]] = {
     "obsidian": ("black", {"obsidian", "обсидиан"}),
     "porcelain": ("white", {"porcelain", "фарфор", "фарфоровый"}),
     "moonstone": ("gray", {"moonstone", "лунный камень"}),
+    "snow": ("white", {"snow", "снег", "снежный"}),
+    "mist": ("gray", {"mist", "fog", "туман", "туманный"}),
+    "lemongrass": ("green", {"lemongrass", "лемонграсс"}),
+    "berry": ("pink", {"berry", "ягода", "ягодный"}),
+    "peony": ("pink", {"peony", "пион", "пионовый"}),
     "bay": ("blue", {"bay", "залив"}),
     "indigo": ("blue", {"indigo", "индиго"}),
     "natural_titanium": (
@@ -121,6 +126,7 @@ _VARIANT_ALIASES: dict[str, tuple[str, set[str]]] = {
     ),
     "space_black": ("black", {"space black", "космический черный"}),
     "phantom_black": ("black", {"phantom black", "фантомный черный"}),
+    "charcoal": ("black", {"charcoal", "угольный"}),
     "graphite": ("gray", {"graphite", "графит", "графитовый"}),
     "forest_green": (
         "green",
@@ -135,6 +141,7 @@ _VARIANT_ALIASES: dict[str, tuple[str, set[str]]] = {
     "mist_blue": ("blue", {"mist blue", "туманный синий"}),
     "sky_blue": ("blue", {"sky blue", "небесно голубой"}),
     "sage": ("green", {"sage", "шалфей"}),
+    "seafoam": ("green", {"seafoam", "морская пена"}),
     "lavender": ("purple", {"lavender", "лаванда", "лавандовый"}),
     "lilac": ("purple", {"lilac", "сиреневый", "лиловый"}),
     "storm_grey": ("gray", {"storm grey", "storm gray", "штормовой серый"}),
@@ -169,7 +176,9 @@ _NON_WORD_RE = re.compile(r"[^0-9a-zа-я]+", re.IGNORECASE)
 _TECHNICAL_PARENTHETICAL = re.compile(
     r"^(?:wi[- ]?fi|lte|5g|4g|global|china|cn|eu|us|usa|"
     r"dual\s*sim|single\s*sim|esim|refurbished|renewed|"
-    r"уценк\w*|восстановлен\w*|без\s+дисковода)$",
+    r"digital\s+edition|gps(?:\s*\+\s*cellular)?|cellular|"
+    r"уценк\w*|восстановлен\w*|без\s+дисковод\w*|"
+    r"с\s+дисковод\w*|с\s+разъем\w*.*|без\s+разъем\w*.*)$",
     re.IGNORECASE,
 )
 
@@ -262,6 +271,7 @@ def extract_color_phrase(value: str | None) -> str | None:
             normalized_phrase
             and len(phrase) <= 40
             and not any(character.isdigit() for character in phrase)
+            and re.search(r"[,;+]", phrase) is None
             and _TECHNICAL_PARENTHETICAL.fullmatch(phrase) is None
         ):
             return phrase
