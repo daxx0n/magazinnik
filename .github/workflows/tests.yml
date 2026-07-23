@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   unittest:
@@ -16,8 +16,10 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout
+      - name: Checkout branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,23 +30,27 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Run live Station Light diagnostic
+      - name: Apply Station Light matching patch
+        run: PYTHONPATH=. python scripts/apply_station_light_matching_fix.py
+
+      - name: Run tests
         shell: bash
         run: |
           set +e
-          PYTHONPATH=. python scripts/live_station_light_sources.py > station-light-output.json 2>&1
-          echo $? > station-light-status.txt
-          exit 0
+          python -m unittest discover -s tests > test-output.txt 2>&1
+          status=$?
+          tail -n 200 test-output.txt
+          exit $status
 
-      - name: Upload Station Light diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: station-light-source-diagnostic
-          path: |
-            station-light-output.json
-            station-light-status.txt
-
-      - name: Propagate diagnostic status
+      - name: Commit generated production patch
         shell: bash
-        run: exit "$(cat station-light-status.txt)"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/services/model_code_matching.py app/services/variant_matching.py app/services/price_service.py
+          if git diff --cached --quiet; then
+            echo "Patch already applied"
+            exit 0
+          fi
+          git commit -m "Fix code-prefix brands and clock variants"
+          git push origin HEAD:${{ github.head_ref }}
