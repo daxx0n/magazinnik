@@ -1,6 +1,10 @@
 name: tests
 
 on:
+  push:
+    branches:
+      - main
+      - agent/product-master-catalog
   pull_request:
 
 permissions:
@@ -9,28 +13,26 @@ permissions:
 jobs:
   unittest:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+
     steps:
-      - name: Print public Onliner search titles
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests
         shell: bash
         run: |
-          python3 - <<'PY'
-          import json
-          import urllib.parse
-          import urllib.request
-
-          params = urllib.parse.urlencode({"query": "Huawei nova Y63 6 128GB", "page": "1"})
-          request = urllib.request.Request(
-              "https://www.onliner.by/sdapi/catalog.api/search/products?" + params,
-              headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-          )
-          with urllib.request.urlopen(request, timeout=45) as response:
-              data = json.load(response)
-          for product in data.get("products", []):
-              print("PRODUCT", json.dumps({
-                  "key": product.get("key"),
-                  "name": product.get("name"),
-                  "full_name": product.get("full_name"),
-                  "html_url": product.get("html_url"),
-              }, ensure_ascii=False))
-          PY
+          set +e
+          python -m unittest discover -s tests > test-output.txt 2>&1
+          status=$?
+          tail -n 160 test-output.txt
+          exit $status
