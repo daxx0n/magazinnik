@@ -99,7 +99,7 @@ _VARIANT_REMOVERS = (
         r"\b(?:digital\s+edition|без\s+дисковод\w*|с\s+дисковод\w*)\b",
         re.I,
     ),
-    re.compile(r"\b(?:usb\s*(?:type\s*)?c|lightning)\b", re.I),
+    re.compile(r"\b(?:usb\s*(?:type[-\s]*)?c|lightning)\b", re.I),
     re.compile(
         r"\b(?:русск\w*|russian|английск\w*|english)\s+озвучк\w*\b",
         re.I,
@@ -208,7 +208,7 @@ def connector_configuration(value: str | None) -> str | None:
     normalized = _normalize(value)
     if re.search(r"\blightning\b", normalized):
         return "lightning"
-    if re.search(r"\busb\s*(?:type\s*)?c\b", normalized):
+    if re.search(r"\busb\s*(?:type[-\s]*)?c\b", normalized):
         return "usb_c"
     return None
 
