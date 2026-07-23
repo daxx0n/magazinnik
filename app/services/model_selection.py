@@ -2,10 +2,6 @@ import re
 from collections.abc import Iterable
 
 from app.models.product import ProductCandidate
-from app.services.color_normalizer import (
-    color_identities_match,
-    extract_color_identity,
-)
 from app.services.product_variants import (
     ProductVariantGroup,
     base_product_title,
@@ -116,16 +112,14 @@ def explicit_color_mismatch(
     requested_title: str | None,
     candidate_title: str,
 ) -> bool:
-    """Строго проверяет выбранный exact-variant в production matching."""
+    """Строго проверяет цвет после выбора конечной модификации."""
 
-    requested_color = extract_color_identity(requested_title)
-    if requested_color is None:
-        return False
-
-    candidate_color = extract_color_identity(candidate_title)
-    if candidate_color is None:
-        return True
-    return not color_identities_match(requested_color, candidate_color)
+    requested_color = requested_color_key(requested_title)
+    candidate_color = requested_color_key(candidate_title)
+    return bool(
+        requested_color is not None
+        and candidate_color != requested_color
+    )
 
 
 def significant_model_numbers(value: str) -> set[str]:
