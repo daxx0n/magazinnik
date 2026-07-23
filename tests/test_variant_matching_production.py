@@ -76,6 +76,40 @@ class VariantMatchingProductionTest(unittest.TestCase):
                     expected,
                 )
 
+    def test_rejects_connector_voice_condition_and_bundle_differences(self) -> None:
+        cases = [
+            (
+                "Apple AirPods Pro 2 Lightning",
+                "Apple AirPods Pro 2 USB Type-C",
+                "configuration",
+            ),
+            (
+                "Roborock Q8 Max с русской озвучкой",
+                "Roborock Q8 Max с английской озвучкой",
+                "configuration",
+            ),
+            (
+                "Apple iPhone 17 Pro 256GB",
+                "Apple iPhone 17 Pro 256GB Open Box",
+                "condition",
+            ),
+            (
+                "Sony PlayStation 5 Slim + DualSense",
+                "Sony PlayStation 5 Slim + Headset",
+                "bundle",
+            ),
+        ]
+        for canonical, candidate, expected in cases:
+            with self.subTest(canonical=canonical, candidate=candidate):
+                self.assertEqual(
+                    CatalogFirstPriceService._model_mismatch_reason(
+                        canonical,
+                        candidate,
+                        requested_title=canonical,
+                    ),
+                    expected,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
