@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from dataclasses import replace
 
 from app.models.product import ProductCandidate
 from app.services.color_normalizer import EXACT_VARIANT, extract_color_identity
@@ -49,23 +50,25 @@ def selection_color_label(title: str) -> str | None:
 def group_selection_model_variants(
     products: Iterable[ProductCandidate],
 ) -> list[ProductVariantGroup]:
-    """Keeps existing grouping but removes UI-only trailing color names."""
+    """Groups by a color-neutral copy while returning original candidates."""
 
-    groups = group_model_variants(products)
-    merged: dict[str, list[ProductCandidate]] = {}
-    titles: dict[str, str] = {}
+    product_list = list(products)
+    originals = {product.key: product for product in product_list}
+    normalized = [
+        replace(
+            product,
+            title=_ISAI_BLUE_SUFFIX.sub("", product.title).strip(" -/,")
+            if _ISAI_BLUE_SUFFIX.search(product.title)
+            else product.title,
+        )
+        for product in product_list
+    ]
 
-    for group in groups:
-        title = _ISAI_BLUE_SUFFIX.sub("", group.title).strip(" -/,")
-        key = re.sub(
-            r"[^a-zа-я0-9]+",
-            " ",
-            title.casefold().replace("ё", "е"),
-        ).strip()
-        merged.setdefault(key, []).extend(group.products)
-        titles.setdefault(key, title)
-
+    groups = group_model_variants(normalized)
     return [
-        ProductVariantGroup(title=titles[key], products=group_products)
-        for key, group_products in merged.items()
+        ProductVariantGroup(
+            title=group.title,
+            products=[originals[product.key] for product in group.products],
+        )
+        for group in groups
     ]
