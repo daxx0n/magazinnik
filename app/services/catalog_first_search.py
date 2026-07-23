@@ -19,6 +19,10 @@ from app.services.model_selection import (
     requested_color_key,
 )
 from app.services.price_service import PriceService
+from app.services.variant_matching import (
+    neutralize_variant_markers,
+    variant_mismatch_reason,
+)
 from app.sources import ProductNotFoundError
 
 
@@ -187,7 +191,7 @@ class CatalogFirstPriceService(PriceService):
         candidate_title: str,
         requested_title: str | None = None,
     ) -> str | None:
-        """Строго проверяет выбранные поколение, память и цвет."""
+        """Строго проверяет выбранные модель и материальные модификации."""
 
         reference_title = requested_title or canonical_title
         if generation_mismatch(
@@ -199,10 +203,22 @@ class CatalogFirstPriceService(PriceService):
 
         reference_color = requested_color_key(reference_title)
         candidate_color = requested_color_key(candidate_title)
+
+        def model_only_title(value: str) -> str:
+            neutral = neutralize_variant_markers(color_neutral_title(value))
+            return color_neutral_title(neutral)
+
         reason = PriceService._model_mismatch_reason(
-            canonical_title=color_neutral_title(canonical_title),
-            candidate_title=color_neutral_title(candidate_title),
-            requested_title=color_neutral_title(reference_title),
+            canonical_title=model_only_title(canonical_title),
+            candidate_title=model_only_title(candidate_title),
+            requested_title=model_only_title(reference_title),
+        )
+        if reason is not None:
+            return reason
+
+        reason = variant_mismatch_reason(
+            requested_title=reference_title,
+            candidate_title=candidate_title,
         )
         if reason is not None:
             return reason
