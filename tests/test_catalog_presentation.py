@@ -36,8 +36,8 @@ class CatalogPresentationTest(unittest.IsolatedAsyncioTestCase):
         )
 
         text = message.edit_text.call_args.args[0]
-        self.assertEqual(text.count("📱"), 1)
-        self.assertIn("📱 Bosch HBA534EB3", text)
+        self.assertEqual(text.count("🏷️"), 1)
+        self.assertIn("🏷️ Bosch HBA534EB3", text)
         self.assertIn("21vek", text)
         self.assertIn("Onliner", text)
         self.assertIn(
@@ -59,7 +59,7 @@ class CatalogPresentationTest(unittest.IsolatedAsyncioTestCase):
         await show_comparison(message=message, offers=offers)
 
         text = message.edit_text.call_args.args[0]
-        self.assertEqual(text.count("📱"), 2)
+        self.assertEqual(text.count("🏷️"), 2)
         self.assertIn("Убедись, что ссылки ведут", text)
 
     def test_diagnostics_exposes_master_product(self) -> None:
@@ -75,7 +75,7 @@ class CatalogPresentationTest(unittest.IsolatedAsyncioTestCase):
 
         text = format_comparison_diagnostics(comparison)
 
-        self.assertIn("📱 Bosch HBA534EB3", text)
+        self.assertIn("🏷️ Bosch HBA534EB3", text)
         self.assertIn("🧩 Мастер-карточка: product-7", text)
 
 
