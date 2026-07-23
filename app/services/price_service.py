@@ -1079,6 +1079,11 @@ class PriceService:
             normalized = value.casefold()
             normalized = normalized.replace("ё", "е")
             normalized = re.sub(
+                r"\bmini[\s-]*led\b",
+                "miniled",
+                normalized,
+            )
+            normalized = re.sub(
                 r"\bps\s*([45])\b",
                 r"playstation \1",
                 normalized,
@@ -1096,9 +1101,21 @@ class PriceService:
         candidate_tokens = set(candidate.split())
 
         generic_title_words = {
+            "ai",
             "headphones",
             "laptop",
+            "lcd",
+            "led",
+            "microled",
+            "miniled",
             "monitor",
+            "nanocell",
+            "neoqled",
+            "oled",
+            "qled",
+            "qned",
+            "smart",
+            "uhd",
             "phone",
             "printer",
             "router",
