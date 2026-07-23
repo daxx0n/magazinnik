@@ -530,7 +530,7 @@ class SourceStatusesTest(unittest.IsolatedAsyncioTestCase):
         text = message.edit_text.await_args.args[0]
         self.assertIn("Найдено предложений: 6", text)
         self.assertIn(
-            "📱 Apple iPhone 17 512GB (Mist Blue)",
+            "🏷️ Apple iPhone 17 512GB (Mist Blue)",
             text,
         )
         self.assertLess(
