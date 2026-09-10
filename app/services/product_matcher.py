@@ -72,6 +72,18 @@ class ProductMatcher:
                 conflicts=("model",),
             )
 
+        # A high edit similarity is not evidence that two generations or model
+        # codes are the same product (e.g. iPhone 15 Pro / iPhone 16 Pro).
+        left_numbers = re.findall(r"\d+", self._normalize(canonical.model) or "")
+        right_numbers = re.findall(r"\d+", self._normalize(candidate.model) or "")
+        if left_numbers and right_numbers and left_numbers != right_numbers:
+            return MatchResult(
+                level=MatchLevel.REJECTED,
+                score=0.0,
+                reason="different_product",
+                conflicts=("model",),
+            )
+
         combined_score = round(brand_score * 0.25 + model_score * 0.75, 4)
 
         if brand_score >= 0.9 and model_score >= 0.9:
