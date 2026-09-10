@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import os
 import secrets
 from collections import Counter, OrderedDict
@@ -37,6 +38,7 @@ from app.services.model_selection import (
 from app.services.price_service import PriceService
 from app.services.price_history import PriceHistoryRepository
 from app.services.search_input import SearchInputError, normalize_search_query
+from app.services.telegram_text import split_message
 from app.services.search_load import (
     SearchBusyError,
     SearchRequestCoordinator,
@@ -2017,15 +2019,18 @@ async def show_comparison(
         ]
     )
 
-    await message.edit_text(
-        "\n".join(lines),
-        disable_web_page_preview=True,
-        reply_markup=(
-            build_price_tracking_keyboard(product_key)
-            if product_key
-            else None
-        ),
-    )
+    chunks = split_message("\n".join(lines))
+    for index, chunk in enumerate(chunks):
+        sender = message.edit_text if index == 0 else message.answer
+        await sender(
+            chunk,
+            disable_web_page_preview=True,
+            reply_markup=(
+                build_price_tracking_keyboard(product_key)
+                if product_key and index == len(chunks) - 1
+                else None
+            ),
+        )
 
 
 def build_price_tracking_keyboard(
@@ -2061,10 +2066,10 @@ async def check_price_alerts(bot: Bot) -> None:
             try:
                 comparison = (
                     await comparison_coordinator.run(
-                        (alert.product_key, alert.query),
+                        (alert.product_key, ""),
                         lambda: price_service.search_all_sources_by_onliner_key(
                             alert.product_key,
-                            original_query=alert.query,
+                            original_query=None,
                         ),
                     )
                 )
@@ -2076,51 +2081,60 @@ async def check_price_alerts(bot: Bot) -> None:
                 comparisons[alert.product_key] = None
             else:
                 comparisons[alert.product_key] = comparison
-                await asyncio.to_thread(
-                    repository.record_offers,
-                    alert.product_key,
-                    (
-                        comparison.master_product_title
-                        or comparison.product_title
-                        or alert.title
-                    ),
-                    comparison.offers,
-                )
+                try:
+                    await asyncio.to_thread(
+                        repository.record_offers,
+                        alert.product_key,
+                        (
+                            comparison.master_product_title
+                            or comparison.product_title
+                            or alert.title
+                        ),
+                        comparison.offers,
+                    )
+                except Exception:
+                    logger.exception("Price alert history write failed: product=%s", alert.product_key)
 
         comparison = comparisons[alert.product_key]
 
         if comparison is None:
             continue
 
-        if not comparison.offers:
-            await asyncio.to_thread(repository.mark_checked, alert)
-            continue
-
-        cheapest = comparison.offers[0]
-        current_price = float(cheapest.price)
-
-        if current_price < alert.last_notified_price:
-            await bot.send_message(
-                chat_id=alert.chat_id,
-                text=(
-                    "🔔 Цена снизилась\n\n"
-                    f"🏷️ {display_product_title(alert.title)}\n"
-                    f"💰 Было: {alert.last_notified_price:.2f} "
-                    f"{alert.currency}\n"
-                    f"✅ Стало: {current_price:.2f} "
-                    f"{cheapest.currency} — "
-                    f"{cheapest.seller or cheapest.source}\n"
-                    f"🔗 {cheapest.url}"
-                ),
-                disable_web_page_preview=True,
+        try:
+            comparable = [
+                offer for offer in comparison.offers
+                if offer.currency.casefold() == alert.currency.casefold()
+                and offer.available
+                and math.isfinite(float(offer.price))
+                and float(offer.price) >= 0
+            ]
+            cheapest = min(comparable, key=lambda offer: float(offer.price), default=None)
+            current_price = float(cheapest.price) if cheapest is not None else None
+            if current_price is not None and current_price < alert.last_notified_price:
+                await bot.send_message(
+                    chat_id=alert.chat_id,
+                    text=(
+                        "🔔 Цена снизилась\n\n"
+                        f"🏷️ {display_product_title(alert.title)}\n"
+                        f"💰 Было: {alert.last_notified_price:.2f} "
+                        f"{alert.currency}\n"
+                        f"✅ Стало: {current_price:.2f} "
+                        f"{cheapest.currency} — "
+                        f"{cheapest.seller or cheapest.source}\n"
+                        f"🔗 {cheapest.url}"
+                    ),
+                    disable_web_page_preview=True,
+                )
+                await asyncio.to_thread(repository.mark_checked, alert, current_price)
+            else:
+                await asyncio.to_thread(repository.mark_checked, alert)
+        except Exception:
+            # A blocked chat or transient database error must not starve the
+            # remaining subscribers; failed deliveries retain their baseline.
+            logger.exception(
+                "Price alert delivery/check failed: chat=%s product=%s",
+                alert.chat_id, alert.product_key,
             )
-            await asyncio.to_thread(
-                repository.mark_checked,
-                alert,
-                current_price,
-            )
-        else:
-            await asyncio.to_thread(repository.mark_checked, alert)
 
 
 async def run_price_alert_loop(
@@ -2131,7 +2145,10 @@ async def run_price_alert_loop(
 
     while True:
         await asyncio.sleep(interval_seconds)
-        await check_price_alerts(bot)
+        try:
+            await check_price_alerts(bot)
+        except Exception:
+            logger.exception("Price alert iteration failed; will retry next interval")
 
 
 def format_source_status(
