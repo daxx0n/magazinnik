@@ -52,6 +52,15 @@ _TRAILING_TECHNICAL_CODE = re.compile(
     r"(?:\s+(?:/\s*)?A)?)[)\]]?\s*$",
     re.IGNORECASE,
 )
+_IPHONE_CANONICAL_MODEL = re.compile(
+    r"\b(?:apple\s+)?iphone\s*"
+    r"(?P<model>"
+    r"\d{1,2}e?(?:\s*(?:pro(?:\s*max)?|plus|mini|air|max))?"
+    r"|se(?:\s*\(?\s*20\d{2}\s*\)?)?"
+    r"|xs(?:\s*max)?|xr|x|air|duo"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 def selection_color_key(title: str | None) -> str | None:
@@ -134,6 +143,9 @@ def selection_model_title(title: str) -> str:
         result = re.sub(r"\bapple\b", "Apple", result, flags=re.IGNORECASE)
         result = re.sub(r"\biphone\b", "iPhone", result, flags=re.IGNORECASE)
         result = " ".join(result.split()).strip(" -/,")
+        canonical_iphone = _canonical_iphone_model(result)
+        if canonical_iphone is not None:
+            return canonical_iphone
     if _ISAI_BLUE_SUFFIX.search(result):
         return _ISAI_BLUE_SUFFIX.sub("", result).strip(" -/,")
     phrase = extract_color_phrase(result)
@@ -142,6 +154,39 @@ def selection_model_title(title: str) -> str:
             if result.casefold().endswith(suffix.casefold()):
                 return result[:-len(suffix)].strip(" -/,")
     return result
+
+
+def _canonical_iphone_model(value: str) -> str | None:
+    """Return only the marketed iPhone model, never color, SIM or SKU data."""
+
+    match = _IPHONE_CANONICAL_MODEL.search(value)
+    if match is None:
+        return None
+    model = " ".join(match.group("model").split())
+    folded = model.casefold()
+    if folded.startswith("se"):
+        year = re.search(r"20\d{2}", model)
+        return "Apple iPhone SE" + (f" {year.group(0)}" if year else "")
+    if folded in {"x", "xr", "xs", "xs max"}:
+        return "Apple iPhone " + folded.upper()
+    if folded in {"air", "duo"}:
+        return "Apple iPhone " + folded.title()
+
+    number = re.match(r"\d{1,2}e?", folded)
+    if number is None:
+        return None
+    suffix = folded[number.end():].strip()
+    suffix_labels = {
+        "pro": "Pro",
+        "pro max": "Pro Max",
+        "promax": "Pro Max",
+        "plus": "Plus",
+        "mini": "mini",
+        "air": "Air",
+        "max": "Max",
+    }
+    canonical = f"Apple iPhone {number.group(0)}"
+    return canonical + (f" {suffix_labels[suffix]}" if suffix else "")
 
 
 def _model_key(value: str) -> str:
