@@ -30,11 +30,12 @@ from app.services.any_color import (
     aggregate_any_color_results,
     load_any_color_results,
 )
-from app.services.model_selection import (
-    group_model_variants,
-    requested_color_key,
-    selected_color_label,
+from app.services.selection_presentation import (
+    group_selection_model_variants as group_model_variants,
+    selection_color_key as requested_color_key,
+    selection_color_label as selected_color_label,
 )
+from app.services.sim_selection import sim_groups, SIM_LABELS
 from app.services.price_service import PriceService
 from app.services.price_history import PriceHistoryRepository
 from app.services.search_input import SearchInputError, normalize_search_query
@@ -885,6 +886,8 @@ async def handle_variant_group(
             user_id=user_id,
             product_key=group.products[0].key,
         )
+        if await show_sim_selection(callback.message, group, group.products, search_id, group_index, "all"):
+            return
         await show_color_selection(
             message=callback.message,
             group=group,
@@ -954,6 +957,8 @@ async def handle_memory_selection(
         user_id=user_id,
         product_key=memory_products[0].key,
     )
+    if await show_sim_selection(callback.message, group, memory_products, search_id, group_index, str(memory_index)):
+        return
     await show_color_selection(
         message=callback.message,
         group=group,
@@ -1022,6 +1027,88 @@ async def handle_any_color_selection(callback: CallbackQuery) -> None:
         user_id=user_id,
     )
 
+async def show_sim_selection(message, group, products, search_id, group_index, memory_index) -> bool:
+    variants = sim_groups(products)
+    if len(variants) <= 1:
+        return False
+    builder = InlineKeyboardBuilder()
+    prefix = f"ols:{search_id}:{group_index}:{memory_index}"
+    builder.row(InlineKeyboardButton(text="💰 Любая SIM — найти дешевле", callback_data=f"{prefix}:any"))
+    for index, (key, _) in enumerate(variants):
+        builder.row(InlineKeyboardButton(text=SIM_LABELS[key], callback_data=f"{prefix}:{index}"))
+    back = f"olg:{search_id}:{group_index}" if memory_index != "all" else f"olp:{search_id}:{group_index // PRODUCT_PAGE_SIZE}"
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=back))
+    memory = extract_memory(products[0].title)
+    await message.edit_text(
+        f"🏷️ {group.title}" + (f" · {memory}" if memory else "") +
+        "\n\nВыбери SIM-конфигурацию. Затем выберем цвет.\n"
+        "«Любая» сравнит все найденные SIM-варианты выбранной памяти.",
+        reply_markup=builder.as_markup(),
+    )
+    return True
+
+
+@router.callback_query(F.data.startswith("ols:"))
+async def handle_sim_selection(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message is None:
+        return
+    parts = (callback.data or "").split(":")
+    if len(parts) != 5:
+        return
+    _, search_id, raw_group, raw_memory, raw_sim = parts
+    products = authorized_product_search(callback, search_id)
+    if products is None:
+        await callback.message.answer("Результаты поиска устарели или принадлежат другому пользователю. Повтори запрос.")
+        return
+    try:
+        group_index = int(raw_group)
+        if group_index < 0:
+            return
+        group = ordered_variant_groups(products, group_model_variants)[group_index]
+        if raw_memory == "all":
+            selected = group.products
+        else:
+            memory_index = int(raw_memory)
+            if memory_index < 0:
+                return
+            selected = selectable_memory_groups(group.products)[memory_index][1]
+        if raw_sim != "any":
+            sim_index = int(raw_sim)
+            if sim_index < 0:
+                return
+            selected = sim_groups(selected)[sim_index][1]
+    except (ValueError, IndexError):
+        return
+    user_id = callback_user_id(callback)
+    query = selection_query_registry.get(chat_id=message_chat_id(callback.message), user_id=user_id, product_key=selected[0].key)
+    subset_id = store_product_search(selected, query=query or "", owner_chat_id=message_chat_id(callback.message), owner_user_id=user_id)
+    sim_label = "Любая SIM" if raw_sim == "any" else SIM_LABELS[sim_groups(selected)[0][0]]
+    await show_color_selection(
+        message=callback.message, group=ProductVariantGroup(title=f"{group.title} · {sim_label}", products=selected),
+        products=selected, back_callback=f"olm:{search_id}:{group_index}:{raw_memory}" if raw_memory != "all" else f"olg:{search_id}:{group_index}",
+        any_callback=f"ola:{subset_id}:0:all", original_query=query, user_id=user_id,
+        memory_selected=raw_memory != "all",
+    )
+
+
+@router.callback_query(F.data.startswith("olv:"))
+async def handle_color_variants(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message is None:
+        return
+    parts = (callback.data or "").split(":")
+    if len(parts) != 2:
+        return
+    products = authorized_product_search(callback, parts[1])
+    if not products:
+        await callback.message.answer("Результаты поиска устарели или принадлежат другому пользователю. Повтори запрос.")
+        return
+    user_id = callback_user_id(callback)
+    query = selection_query_registry.get(chat_id=message_chat_id(callback.message), user_id=user_id, product_key=products[0].key)
+    await load_any_color_comparison(callback.message, products, query, user_id)
+
+
 async def load_any_color_comparison(
     message: Message,
     products: list[ProductCandidate],
@@ -1031,14 +1118,14 @@ async def load_any_color_comparison(
     """Объединяет предложения всех цветов и сортирует по цене."""
 
     await message.edit_text(
-        "🔎 Ищу минимальную цену среди всех цветов..."
+        "🔎 Сравниваю цены для выбранных вариантов..."
     )
 
     async def load(product: ProductCandidate) -> ComparisonResult | None:
         try:
-            return await price_service.search_all_sources_by_onliner_key(
-                product.key,
-                original_query=None,
+            return await comparison_coordinator.run(
+                (product.key, ""),
+                lambda: price_service.search_all_sources_by_onliner_key(product.key, original_query=None),
             )
         except (ProductNotFoundError, SourceUnavailableError):
             return None
@@ -1561,28 +1648,35 @@ async def show_color_selection(
     """Shows color choices and skips memory wording when memory is not selectable."""
 
     colored_products = [
-        product
-        for product in products
+        product for product in products
         if requested_color_key(product.title) is not None
     ]
     selectable_products = colored_products or products
-
-    choices: dict[tuple[str, str], ProductCandidate] = {}
+    choices: dict[tuple[str, str], list[ProductCandidate]] = {}
     for product in selectable_products:
         color_key = requested_color_key(product.title) or "unknown"
         memory = extract_memory(product.title) or "Без выбора памяти"
         choice_memory = memory if memory_selected else ""
-        choices.setdefault((color_key, choice_memory), product)
+        choices.setdefault((color_key, choice_memory), []).append(product)
 
     if len(choices) == 1:
-        only_product = next(iter(choices.values()))
+        only_products = next(iter(choices.values()))
+        only_product = only_products[0]
         if requested_color_key(only_product.title) is None:
-            await load_product_comparison(
-                message=message,
-                product_key=only_product.key,
-                original_query=original_query,
-                user_id=user_id,
-            )
+            if len(only_products) == 1:
+                await load_product_comparison(
+                    message=message,
+                    product_key=only_product.key,
+                    original_query=original_query,
+                    user_id=user_id,
+                )
+            else:
+                await load_any_color_comparison(
+                    message=message,
+                    products=only_products,
+                    original_query=original_query,
+                    user_id=user_id,
+                )
             return
 
     color_counts = Counter(
@@ -1599,17 +1693,26 @@ async def show_color_selection(
     sorted_choices = sorted(
         choices.items(),
         key=lambda item: (
-            (selected_color_label(item[1].title) or "").casefold(),
+            (selected_color_label(item[1][0].title) or "").casefold(),
             item[0][1],
-            item[1].title.casefold(),
+            item[1][0].title.casefold(),
         ),
     )
 
-    for (color_key, memory), product in sorted_choices:
+    for (color_key, memory), color_products in sorted_choices:
+        product = color_products[0]
         label = selected_color_label(product.title) or "Цвет не указан"
         if memory_selected and color_counts[color_key] > 1:
             label = f"{label} · {memory}"
 
+        if len(color_products) == 1:
+            callback_data = f"ol:{product.key}"
+        else:
+            color_session = store_product_search(
+                color_products, query=original_query or "",
+                owner_chat_id=message_chat_id(message), owner_user_id=user_id,
+            )
+            callback_data = f"olv:{color_session}"
         builder.row(
             InlineKeyboardButton(
                 text=(
@@ -1617,7 +1720,7 @@ async def show_color_selection(
                     if len(label) <= 58
                     else label[:55] + "..."
                 ),
-                callback_data=f"ol:{product.key}",
+                callback_data=callback_data,
             )
         )
 

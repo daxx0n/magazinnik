@@ -6,6 +6,7 @@ from app.services.model_selection import (
     requested_color_key,
 )
 from app.services.product_variants import extract_memory
+from app.services.color_normalizer import extract_color_identity
 
 
 class ProductIdentityBuilder:
@@ -49,6 +50,7 @@ class ProductIdentityBuilder:
         """Возвращает признаки, пригодные для межмагазинного сопоставления."""
 
         detected_revision = self._normalize_text(revision) or self._extract_revision(title)
+        color_identity = extract_color_identity(title)
         cleaned_title = self._clean_title(title)
         detected_brand = self._normalize_text(brand) or self._extract_brand(cleaned_title)
         detected_model = self._normalize_text(model) or self._extract_model(
@@ -60,7 +62,11 @@ class ProductIdentityBuilder:
             brand=detected_brand,
             model=detected_model,
             memory=extract_memory(title),
-            color=requested_color_key(title),
+            color=(
+                color_identity.key
+                if color_identity is not None
+                else requested_color_key(title)
+            ),
             revision=detected_revision,
             ean=self._normalize_identifier(ean),
             mpn=self._normalize_identifier(mpn),

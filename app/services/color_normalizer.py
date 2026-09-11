@@ -175,7 +175,7 @@ _BASE_COLOR_ALIASES: dict[str, set[str]] = {
 _NON_WORD_RE = re.compile(r"[^0-9a-zа-я]+", re.IGNORECASE)
 _TECHNICAL_PARENTHETICAL = re.compile(
     r"^(?:wi[- ]?fi|lte|5g|4g|global|china|cn|eu|us|usa|"
-    r"dual\s*sim|single\s*sim|esim|refurbished|renewed|"
+    r"dual\s*e?[-\s]?sim|single\s*sim|esim|refurbished|renewed|"
     r"digital\s+edition|gps(?:\s*\+\s*cellular)?|cellular|"
     r"уценк\w*|восстановлен\w*|без\s+дисковод\w*|"
     r"с\s+дисковод\w*|с\s+разъем\w*.*|без\s+разъем\w*.*)$",
@@ -261,6 +261,26 @@ def extract_color_phrase(value: str | None) -> str | None:
         return None
 
     text = " ".join(value.split()).strip()
+    # Source-provided phone colors may be new marketing names, not entries in
+    # our alias dictionary. Only accept an explicit suffix after memory and
+    # keep technical configurations out of it. Never infer a manufacturer's
+    # palette or turn an arbitrary word in the model name into a color.
+    if re.search(
+        r"\b(?:iphone|pixel|galaxy|redmi|poco|apple|samsung|google|"
+        r"xiaomi|huawei|honor|oneplus|realme|oppo|vivo|nothing|"
+        r"motorola|nokia|infinix|tecno|zte|asus|sony|"
+        r"смартфон|smartphone)\b",
+        text,
+        re.I,
+    ):
+        from app.services.sim_selection import without_sim
+        memory_suffix = re.search(r"\d+\s*(?:GB|TB|ГБ|ТБ)\s+(.+)$", text, re.I)
+        if memory_suffix:
+            suffix = without_sim(memory_suffix.group(1)).strip(" ()")
+            if (suffix and len(suffix) <= 40 and not re.search(r"[\d,;+()/]", suffix)
+                    and _TECHNICAL_PARENTHETICAL.fullmatch(suffix) is None
+                    and not re.search(r"\b(?:версия|version|edition|гарантия|warranty|global|china|eu|us|new|новый)\b", suffix, re.I)):
+                return suffix
     trailing = re.search(r"\(([^()]*)\)\s*$", text)
     if trailing is not None:
         phrase = trailing.group(1).strip()
