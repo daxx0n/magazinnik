@@ -22,6 +22,28 @@ from app.services.product_variants import ProductVariantGroup
 
 
 _ISAI_BLUE_SUFFIX = re.compile(r"\s+isai[-\s]+blue\s*$", re.IGNORECASE)
+_GENERIC_PRODUCT_PREFIX = re.compile(
+    r"^(?:(?:мобильный\s+)?(?:телефон|смартфон)|"
+    r"ноутбук|планшет|телевизор|монитор|видеокарта|процессор|"
+    r"материнская\s+плата|наушники|гарнитура|"
+    r"(?:умные|смарт[-\s]?)\s*часы|часы|"
+    r"игровая\s+консоль|консоль|фотоаппарат|камера|принтер|"
+    r"роутер|маршрутизатор|холодильник|стиральная\s+машина|"
+    r"посудомоечная\s+машина|пылесос|духовой\s+шкаф|"
+    r"варочная\s+панель|микроволновая\s+печь|кофемашина|"
+    r"кондиционер|водонагреватель|фен|электробритва|"
+    r"smartphone|mobile\s+phone|cell\s+phone|laptop|tablet|"
+    r"television|tv|monitor|graphics\s+card|headphones|headset|"
+    r"smartwatch|game\s+console|camera|printer|router|"
+    r"refrigerator|washing\s+machine|vacuum\s+cleaner)"
+    r"\s*[:—-]?\s+",
+    re.IGNORECASE,
+)
+_TRAILING_TECHNICAL_CODE = re.compile(
+    r"\s+(?P<code>[A-ZА-Я0-9][A-ZА-Я0-9._/-]{4,}"
+    r"(?:\s+(?:/\s*)?A)?)\s*$",
+    re.IGNORECASE,
+)
 
 
 def selection_color_key(title: str | None) -> str | None:
@@ -65,6 +87,7 @@ def group_selection_model_variants(
         )
         for product in product_list
     ]
+    normalized = _collapse_contextual_skus(normalized)
 
     groups = group_model_variants(normalized)
     return [
@@ -79,6 +102,12 @@ def group_selection_model_variants(
 def selection_model_title(title: str) -> str:
     """Remove only confirmed color suffix and SIM labels from the UI stem."""
     result = without_sim(title)
+    while _GENERIC_PRODUCT_PREFIX.search(result):
+        result = _GENERIC_PRODUCT_PREFIX.sub("", result).strip()
+    if re.search(r"\b(?:apple|iphone)\b", result, re.IGNORECASE):
+        result = re.sub(r"\bapple\b", "Apple", result, flags=re.IGNORECASE)
+        result = re.sub(r"\biphone\b", "iPhone", result, flags=re.IGNORECASE)
+        result = " ".join(result.split()).strip(" -/,")
     if _ISAI_BLUE_SUFFIX.search(result):
         return _ISAI_BLUE_SUFFIX.sub("", result).strip(" -/,")
     phrase = extract_color_phrase(result)
@@ -87,3 +116,64 @@ def selection_model_title(title: str) -> str:
             if result.casefold().endswith(suffix.casefold()):
                 return result[:-len(suffix)].strip(" -/,")
     return result
+
+
+def _model_key(value: str) -> str:
+    return re.sub(
+        r"[^a-zа-я0-9]+",
+        " ",
+        value.casefold().replace("ё", "е"),
+    ).strip()
+
+
+def _trailing_technical_code(value: str) -> tuple[str, str] | None:
+    match = _TRAILING_TECHNICAL_CODE.search(value)
+    if match is None:
+        return None
+    code = re.sub(r"[^a-zа-я0-9]", "", match.group("code").casefold())
+    if (
+        len(code) < 6
+        or re.search(r"[a-zа-я]", code) is None
+        or re.search(r"\d", code) is None
+    ):
+        return None
+    stem = value[:match.start()].strip(" -/,")
+    # A lone brand plus a code means that the code is the actual model.
+    if len(re.findall(r"[a-zа-я0-9]+", stem, re.IGNORECASE)) < 2:
+        return None
+    return stem, code
+
+
+def _collapse_contextual_skus(
+    products: list[ProductCandidate],
+) -> list[ProductCandidate]:
+    """Hide retailer SKUs only when sibling cards prove a common model."""
+
+    parsed = {
+        product.key: _trailing_technical_code(product.title)
+        for product in products
+    }
+    bare_keys = {
+        _model_key(product.title)
+        for product in products
+        if parsed[product.key] is None
+    }
+    codes_by_stem: dict[str, set[str]] = {}
+    for item in parsed.values():
+        if item is None:
+            continue
+        stem, code = item
+        codes_by_stem.setdefault(_model_key(stem), set()).add(code)
+
+    collapsible = {
+        stem
+        for stem, codes in codes_by_stem.items()
+        if len(codes) >= 2 or stem in bare_keys
+    }
+    return [
+        replace(product, title=item[0])
+        if item is not None and _model_key(item[0]) in collapsible
+        else product
+        for product in products
+        for item in (parsed[product.key],)
+    ]
