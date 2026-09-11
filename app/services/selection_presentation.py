@@ -22,8 +22,8 @@ from app.services.product_variants import ProductVariantGroup
 
 
 _ISAI_BLUE_SUFFIX = re.compile(r"\s+isai[-\s]+blue\s*$", re.IGNORECASE)
-_GENERIC_PRODUCT_PREFIX = re.compile(
-    r"^(?:(?:мобильный\s+)?(?:телефон|смартфон)|"
+_GENERIC_PRODUCT_KIND = (
+    r"(?:(?:мобильный\s+)?(?:телефон|смартфон)|"
     r"ноутбук|планшет|телевизор|монитор|видеокарта|процессор|"
     r"материнская\s+плата|наушники|гарнитура|"
     r"(?:умные|смарт[-\s]?)\s*часы|часы|"
@@ -36,12 +36,20 @@ _GENERIC_PRODUCT_PREFIX = re.compile(
     r"television|tv|monitor|graphics\s+card|headphones|headset|"
     r"smartwatch|game\s+console|camera|printer|router|"
     r"refrigerator|washing\s+machine|vacuum\s+cleaner)"
-    r"\s*[:—-]?\s+",
+)
+_GENERIC_PRODUCT_PREFIX = re.compile(
+    rf"^{_GENERIC_PRODUCT_KIND}\s*[:—-]?\s+",
+    re.IGNORECASE,
+)
+_BRAND_WRAPPED_PRODUCT_KIND = re.compile(
+    rf"^(?P<brand>[a-zа-я0-9][a-zа-я0-9.+-]*)\s+"
+    rf"{_GENERIC_PRODUCT_KIND}\s+"
+    rf"(?:(?P=brand)\s+)?",
     re.IGNORECASE,
 )
 _TRAILING_TECHNICAL_CODE = re.compile(
-    r"\s+(?P<code>[A-ZА-Я0-9][A-ZА-Я0-9._/-]{4,}"
-    r"(?:\s+(?:/\s*)?A)?)\s*$",
+    r"(?:\s+|\s*[(\[])(?P<code>[A-ZА-Я0-9][A-ZА-Я0-9._/-]{4,}"
+    r"(?:\s+(?:/\s*)?A)?)[)\]]?\s*$",
     re.IGNORECASE,
 )
 
@@ -88,6 +96,10 @@ def group_selection_model_variants(
         for product in product_list
     ]
     normalized = _collapse_contextual_skus(normalized)
+    normalized = [
+        replace(product, title=selection_model_title(product.title))
+        for product in normalized
+    ]
 
     groups = group_model_variants(normalized)
     return [
@@ -102,8 +114,22 @@ def group_selection_model_variants(
 def selection_model_title(title: str) -> str:
     """Remove only confirmed color suffix and SIM labels from the UI stem."""
     result = without_sim(title)
-    while _GENERIC_PRODUCT_PREFIX.search(result):
+    while True:
+        previous = result
         result = _GENERIC_PRODUCT_PREFIX.sub("", result).strip()
+        wrapped = _BRAND_WRAPPED_PRODUCT_KIND.search(result)
+        if wrapped is not None:
+            result = (
+                wrapped.group("brand") + " " + result[wrapped.end():]
+            ).strip()
+        result = re.sub(
+            r"^([a-zа-я0-9][a-zа-я0-9.+-]*)\s+\1\b",
+            r"\1",
+            result,
+            flags=re.IGNORECASE,
+        ).strip()
+        if result == previous:
+            break
     if re.search(r"\b(?:apple|iphone)\b", result, re.IGNORECASE):
         result = re.sub(r"\bapple\b", "Apple", result, flags=re.IGNORECASE)
         result = re.sub(r"\biphone\b", "iPhone", result, flags=re.IGNORECASE)
@@ -154,25 +180,32 @@ def _collapse_contextual_skus(
         for product in products
     }
     bare_keys = {
-        _model_key(product.title)
+        _model_key(selection_model_title(product.title))
         for product in products
         if parsed[product.key] is None
     }
     codes_by_stem: dict[str, set[str]] = {}
+    colored_stems: set[str] = set()
     for item in parsed.values():
         if item is None:
             continue
         stem, code = item
-        codes_by_stem.setdefault(_model_key(stem), set()).add(code)
+        model_key = _model_key(selection_model_title(stem))
+        codes_by_stem.setdefault(model_key, set()).add(code)
+        if selection_color_key(stem) is not None:
+            colored_stems.add(model_key)
 
     collapsible = {
         stem
         for stem, codes in codes_by_stem.items()
-        if len(codes) >= 2 or stem in bare_keys
+        if len(codes) >= 2 or stem in bare_keys or stem in colored_stems
     }
     return [
         replace(product, title=item[0])
-        if item is not None and _model_key(item[0]) in collapsible
+        if (
+            item is not None
+            and _model_key(selection_model_title(item[0])) in collapsible
+        )
         else product
         for product in products
         for item in (parsed[product.key],)
