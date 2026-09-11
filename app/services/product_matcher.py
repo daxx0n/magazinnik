@@ -2,6 +2,7 @@ import re
 from difflib import SequenceMatcher
 
 from app.models.catalog import MatchLevel, MatchResult, ProductIdentity
+from app.services.variant_matching import sim_configuration
 
 
 class ProductMatcher:
@@ -15,6 +16,16 @@ class ProductMatcher:
         candidate: ProductIdentity,
     ) -> MatchResult:
         """Возвращает уровень уверенности и объяснимую причину решения."""
+
+        if sim_configuration(canonical.model) != sim_configuration(
+            candidate.model
+        ):
+            return MatchResult(
+                level=MatchLevel.REJECTED,
+                score=0.0,
+                reason="variant_conflict",
+                conflicts=("sim",),
+            )
 
         variant_conflicts = tuple(
             field_name

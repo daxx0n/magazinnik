@@ -11,7 +11,8 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from app.models.product import ProductCandidate
-from app.services.color_normalizer import EXACT_VARIANT, extract_color_identity
+from app.services.color_normalizer import EXACT_VARIANT, UNKNOWN, extract_color_identity, extract_color_phrase
+from app.services.sim_selection import without_sim
 from app.services.model_selection import (
     group_model_variants,
     requested_color_key,
@@ -30,7 +31,7 @@ def selection_color_key(title: str | None) -> str | None:
         return None
 
     identity = extract_color_identity(title)
-    if identity is not None and identity.confidence == EXACT_VARIANT:
+    if identity is not None and identity.confidence in {EXACT_VARIANT, UNKNOWN}:
         return identity.variant
 
     if _ISAI_BLUE_SUFFIX.search(title):
@@ -44,6 +45,9 @@ def selection_color_label(title: str) -> str | None:
 
     if _ISAI_BLUE_SUFFIX.search(title) is not None:
         return "Isai Blue"
+    identity = extract_color_identity(title)
+    if identity is not None and identity.confidence == UNKNOWN:
+        return extract_color_phrase(title)
     return legacy_color_label(title)
 
 
@@ -57,9 +61,7 @@ def group_selection_model_variants(
     normalized = [
         replace(
             product,
-            title=_ISAI_BLUE_SUFFIX.sub("", product.title).strip(" -/,")
-            if _ISAI_BLUE_SUFFIX.search(product.title)
-            else product.title,
+            title=selection_model_title(product.title),
         )
         for product in product_list
     ]
@@ -72,3 +74,16 @@ def group_selection_model_variants(
         )
         for group in groups
     ]
+
+
+def selection_model_title(title: str) -> str:
+    """Remove only confirmed color suffix and SIM labels from the UI stem."""
+    result = without_sim(title)
+    if _ISAI_BLUE_SUFFIX.search(result):
+        return _ISAI_BLUE_SUFFIX.sub("", result).strip(" -/,")
+    phrase = extract_color_phrase(result)
+    if phrase:
+        for suffix in (f"({phrase})", phrase):
+            if result.casefold().endswith(suffix.casefold()):
+                return result[:-len(suffix)].strip(" -/,")
+    return result
