@@ -15,6 +15,11 @@ from app.models.product import ProductCandidate
 from app.models.search_result import SourceSearchStatus
 from app.services.catalog_first_search import CatalogFirstPriceService
 from app.services.catalog_adapter import CatalogOfferAdapter
+from app.services.catalog_relevance import (
+    filter_catalog_candidates,
+    is_catalog_record_relevant,
+    is_iphone_phone_query,
+)
 from app.services.product_identity import ProductIdentityBuilder
 from app.services.product_variants import extract_memory
 from app.services.selection_presentation import selection_color_key
@@ -60,7 +65,7 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
         # Do not gate the whole inventory on one retailer's category discovery.
         return []
 
-    async def find_onliner_products(self, query, category=None):
+    async def find_products(self, query, category=None):
         if category is not None:
             return await super().find_onliner_products(query, category)
         self._requested_queries[query] = None
@@ -68,24 +73,45 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
         while len(self._requested_queries) > 500:
             self._requested_queries.popitem(last=False)
         products = await asyncio.to_thread(self._catalog_service.search, query)
-        candidates = [
+        candidates = filter_catalog_candidates([
             candidate
             for product in products
             if (candidate := self._candidate_from_product(product)) is not None
-        ]
-        if not candidates:
-            await self.discover(query)
+        ], query)
+        if is_iphone_phone_query(query):
+            try:
+                # A broad phone model list must represent every configured
+                # source before it is shown, even when an older local hit
+                # already exists from one retailer.
+                await self.discover(query)
+            except SourceUnavailableError:
+                if not candidates:
+                    raise
             products = await asyncio.to_thread(self._catalog_service.search, query)
-            candidates = [
+            candidates = filter_catalog_candidates([
                 candidate
                 for product in products
                 if (candidate := self._candidate_from_product(product))
                 is not None
-            ]
+            ], query)
+        elif not candidates:
+            await self.discover(query)
+            products = await asyncio.to_thread(self._catalog_service.search, query)
+            candidates = filter_catalog_candidates([
+                candidate
+                for product in products
+                if (candidate := self._candidate_from_product(product))
+                is not None
+            ], query)
         else:
             self._schedule_discovery(query)
         from app.services.model_selection import filter_products_by_query_generation
         return filter_products_by_query_generation(candidates, query)
+
+    async def find_onliner_products(self, query, category=None):
+        """Compatibility alias for callers predating the unified catalog."""
+
+        return await self.find_products(query, category=category)
 
     def _candidate_from_product(self, product):
         now = datetime.now(timezone.utc)
@@ -170,9 +196,20 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
             for name, records, error in batches:
                 for record in records:
                     if isinstance(record, ProductCandidate):
+                        if not is_catalog_record_relevant(
+                            query, record.title, record.url
+                        ):
+                            continue
                         items.append(ExternalCatalogItem(source=name, external_id=record.key,
                             title=record.title, url=record.url, identity=builder.build(record.title)))
-                    elif record.available and math.isfinite(float(record.price)) and record.price >= 0:
+                    elif (
+                        record.available
+                        and math.isfinite(float(record.price))
+                        and record.price >= 0
+                        and is_catalog_record_relevant(
+                            query, record.title, record.url
+                        )
+                    ):
                         items.append(adapter.from_offer(record))
             if items:
                 await asyncio.to_thread(self._catalog_service.ingest_external_items_with_report, items)
@@ -186,6 +223,8 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
 
     @staticmethod
     def _confirmed_variant(canonical, candidate):
+        if not is_catalog_record_relevant(canonical, candidate):
+            return False
         if CatalogFirstPriceService._model_mismatch_reason(canonical, candidate, requested_title=canonical) is not None:
             return False
         # Missing specifications are not confirmation of a selected variant.

@@ -143,6 +143,15 @@ class PriceService:
 
         return products
 
+    async def find_products(
+        self,
+        query: str,
+        category: str | None = None,
+    ) -> list[ProductCandidate]:
+        """Find product cards; concrete services may aggregate many sources."""
+
+        return await self.find_onliner_products(query, category=category)
+
     async def find_onliner_categories(
         self,
         query: str,
