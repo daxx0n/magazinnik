@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import math
 import os
@@ -1455,9 +1456,14 @@ async def handle_search(
             if len(categories) == 1
             else None
         )
+        product_finder = getattr(price_service, "find_products", None)
+        if not inspect.iscoroutinefunction(product_finder):
+            # Compatibility for integrations and test doubles implementing
+            # the original Onliner-named discovery contract.
+            product_finder = price_service.find_onliner_products
         products = await product_discovery_coordinator.run(
             (query.casefold(), selected_category or ""),
-            lambda: price_service.find_onliner_products(
+            lambda: product_finder(
                 query,
                 category=selected_category,
             ),
@@ -1470,12 +1476,12 @@ async def handle_search(
         return
     except SourceUnavailableError as error:
         logger.warning(
-            "Onliner search unavailable: %s",
+            "Product catalog sources unavailable: %s",
             error,
         )
 
         await status_message.edit_text(
-            "Поиск Onliner временно недоступен."
+            "Поиск товаров временно недоступен."
         )
         return
     except Exception:
