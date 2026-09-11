@@ -22,6 +22,7 @@ from app.services.catalog_relevance import (
 )
 from app.services.product_identity import ProductIdentityBuilder
 from app.services.product_variants import extract_memory
+from app.services.price_sanity import is_plausible_full_price
 from app.services.selection_presentation import selection_color_key
 from app.services.variant_matching import sim_configuration
 from app.sources import ProductNotFoundError, SourceUnavailableError
@@ -206,6 +207,11 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
                         record.available
                         and math.isfinite(float(record.price))
                         and record.price >= 0
+                        and is_plausible_full_price(
+                            record.title,
+                            record.price,
+                            record.currency,
+                        )
                         and is_catalog_record_relevant(
                             query, record.title, record.url
                         )
@@ -238,7 +244,17 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
 
     def _catalog_offers(self, product, fresh_only):
         verified = replace(product, offers=[item for item in product.offers
-            if self._confirmed_variant(product.title, item.title)])
+            if (
+                self._confirmed_variant(product.title, item.title)
+                and (
+                    item.price is None
+                    or is_plausible_full_price(
+                        item.title,
+                        item.price,
+                        item.currency or "BYN",
+                    )
+                )
+            )])
         return super()._catalog_offers(verified, fresh_only)
 
     async def search_all_sources_by_onliner_key(self, product_key, original_query=None):
@@ -285,6 +301,9 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
             matches = [offer for offer in candidates
                        if offer.available and math.isfinite(float(offer.price))
                        and float(offer.price) >= 0
+                       and is_plausible_full_price(
+                           offer.title, offer.price, offer.currency
+                       )
                        and self._confirmed_variant(product.title, offer.title)]
             verified.extend(matches)
             if error is not None:
