@@ -22,7 +22,10 @@ from app.services.catalog_relevance import (
 )
 from app.services.product_identity import ProductIdentityBuilder
 from app.services.product_variants import extract_memory
-from app.services.price_sanity import is_plausible_full_price
+from app.services.price_sanity import (
+    filter_price_outliers,
+    is_plausible_full_price,
+)
 from app.services.selection_presentation import selection_color_key
 from app.services.variant_matching import sim_configuration
 from app.sources import ProductNotFoundError, SourceUnavailableError
@@ -255,7 +258,8 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
                     )
                 )
             )])
-        return super()._catalog_offers(verified, fresh_only)
+        offers = super()._catalog_offers(verified, fresh_only)
+        return filter_price_outliers(offers)
 
     async def search_all_sources_by_onliner_key(self, product_key, original_query=None):
         if not product_key.startswith(self._catalog_key_prefix):
@@ -316,6 +320,8 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
                 matched_offers=len(matches),
                 checked_candidates=len(candidates),
             ))
+
+        verified = filter_price_outliers(verified)
 
         if verified:
             await self._catalog_service.ingest_offers_with_report_async(verified)

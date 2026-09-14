@@ -7,6 +7,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.models.offer import ProductOffer
+from app.services.price_sanity import is_plausible_full_price
 from app.sources import SourceUnavailableError
 
 
@@ -191,6 +192,12 @@ class ShopBySource:
             or price is None
             or price <= 0
             or not isinstance(raw_link, str)
+            or not is_plausible_full_price(
+                title,
+                float(price),
+                "BYN",
+                context=row.get_text(" ", strip=True),
+            )
         ):
             return None
 

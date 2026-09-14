@@ -111,6 +111,23 @@ _NON_MODEL_NUMERIC_SUFFIXES = {
     "x",
 }
 
+_REGIONAL_MODEL_SUFFIX = re.compile(
+    r"(?<![a-zа-я0-9])"
+    r"([a-zа-я0-9-]{6,})\s*/\s*"
+    r"(?:lp|ru|by|eu|ua|kz|s[0-9]|[a-z]{2,3})"
+    r"(?![a-zа-я0-9])",
+    re.IGNORECASE,
+)
+_GENERIC_TYPE_WORDS = {
+    "автомагнитола", "видеокарта", "духовой", "шкаф", "кофемашина",
+    "монитор", "ноутбук", "планшет", "пылесос", "робот", "смартфон",
+    "телевизор", "телефон", "холодильник", "часы", "машина",
+    "стиральная", "посудомоечная", "сушильная", "игровая", "приставка",
+    "консоль", "smartphone", "phone", "tablet", "television", "tv",
+    "laptop", "monitor", "washer", "washing", "machine", "dryer",
+    "refrigerator", "dishwasher", "oven", "console", "appliance",
+}
+
 
 _MODEL_VERSION_ALIASES = {
     "pro": "pro",
@@ -345,8 +362,54 @@ def model_variant_title(title: str) -> str:
     """Возвращает модель без памяти и цветового оформления."""
 
     result = color_neutral_title(title)
+    result = _REGIONAL_MODEL_SUFFIX.sub(r"\1", result)
     normalized = base_product_title(result)
+    normalized = _strip_redundant_type_words(normalized)
     return normalized or title
+
+
+def _strip_redundant_type_words(title: str) -> str:
+    """Removes feed category labels and a duplicated leading brand."""
+
+    tokens = title.split()
+    if not tokens:
+        return title
+
+    if tokens[0].casefold() in _GENERIC_TYPE_WORDS:
+        while tokens and tokens[0].casefold() in _GENERIC_TYPE_WORDS:
+            tokens.pop(0)
+        # "Phone Y" and "Tablet X" can be intentional synthetic or real
+        # model names. A category prefix is certain only before brand + model.
+        has_code = any(
+            len(compact := re.sub(r"[^a-zа-я0-9]", "", token.casefold())) >= 5
+            and any(character.isalpha() for character in compact)
+            and any(character.isdigit() for character in compact)
+            for token in tokens
+        )
+        if len(tokens) < 3 and not has_code:
+            return title
+
+    brand = tokens[0].casefold()
+    result = [tokens.pop(0)]
+    descriptor_count = 0
+    while (
+        descriptor_count < len(tokens)
+        and tokens[descriptor_count].casefold() in _GENERIC_TYPE_WORDS
+    ):
+        descriptor_count += 1
+    tail = tokens[descriptor_count:]
+    duplicated_brand = bool(tail and tail[0].casefold() == brand)
+    has_technical_model = any(
+        len(compact := re.sub(r"[^a-zа-я0-9]", "", token.casefold())) >= 5
+        and any(character.isalpha() for character in compact)
+        and any(character.isdigit() for character in compact)
+        for token in tail
+    )
+    if descriptor_count and (duplicated_brand or has_technical_model):
+        tokens = tail
+        if duplicated_brand:
+            tokens.pop(0)
+    return " ".join((*result, *tokens))
 
 
 def group_model_variants(

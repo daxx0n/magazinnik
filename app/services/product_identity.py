@@ -25,6 +25,14 @@ class ProductIdentityBuilder:
         "телевизор",
         "телефон",
         "холодильник",
+        "машина",
+        "стиральная",
+        "посудомоечная",
+        "сушильная",
+        "washer",
+        "washing",
+        "dryer",
+        "appliance",
         "часы",
         "smartphone",
         "tablet",
@@ -84,20 +92,31 @@ class ProductIdentityBuilder:
     @classmethod
     def _extract_brand(cls, title: str) -> str | None:
         tokens = re.findall(r"[a-zа-я0-9][a-zа-я0-9.+-]*", title, re.I)
-        while tokens and tokens[0].casefold() in cls._generic_prefixes:
-            tokens.pop(0)
+        tokens = cls._strip_leading_descriptors(tokens)
         return cls._normalize_text(tokens[0]) if tokens else None
 
     @classmethod
     def _extract_model(cls, title: str, brand: str | None) -> str | None:
         tokens = re.findall(r"[a-zа-я0-9][a-zа-я0-9.+-]*", title, re.I)
-        while tokens and tokens[0].casefold() in cls._generic_prefixes:
-            tokens.pop(0)
+        tokens = cls._strip_leading_descriptors(tokens)
 
-        if brand and tokens and cls._normalize_text(tokens[0]) == brand:
-            tokens.pop(0)
+        # Some feeds produce titles such as "Apple Смартфон Apple iPhone".
+        # Consume repeated type labels and brand names before the real model.
+        while tokens:
+            if brand and cls._normalize_text(tokens[0]) == brand:
+                tokens.pop(0)
+                tokens = cls._strip_leading_descriptors(tokens)
+                continue
+            break
 
         return cls._normalize_text(" ".join(tokens))
+
+    @classmethod
+    def _strip_leading_descriptors(cls, tokens: list[str]) -> list[str]:
+        result = list(tokens)
+        while result and result[0].casefold() in cls._generic_prefixes:
+            result.pop(0)
+        return result
 
     @classmethod
     def _extract_revision(cls, title: str) -> str | None:

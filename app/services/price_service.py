@@ -35,6 +35,10 @@ from app.sources.zeon import ZeonSource
 from app.services.catalog_service import CatalogService
 from app.services.model_code_matching import technical_model_code_words
 from app.services.model_selection import model_version_signature
+from app.services.price_sanity import (
+    filter_price_outliers,
+    is_plausible_full_price,
+)
 from app.services.product_variants import (
     display_color,
     extract_color,
@@ -506,9 +510,16 @@ class PriceService:
                 )
             )
 
-        catalog_report = await self._ingest_catalog_offers(
-            combined_offers
+        combined_offers = filter_price_outliers(
+            offer
+            for offer in combined_offers
+            if is_plausible_full_price(
+                offer.title,
+                offer.price,
+                offer.currency,
+            )
         )
+        catalog_report = await self._ingest_catalog_offers(combined_offers)
         master_product = self._master_product_for_report(
             catalog_report
         )
@@ -1032,7 +1043,13 @@ class PriceService:
             offer
             for offer in offers
             if offer.available
+            and is_plausible_full_price(
+                offer.title,
+                offer.price,
+                offer.currency,
+            )
         ]
+        available_offers = filter_price_outliers(available_offers)
 
         sorted_offers = sorted(
             available_offers,
