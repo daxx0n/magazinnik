@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -186,6 +187,23 @@ class PersistentUnifiedCatalogTest(unittest.IsolatedAsyncioTestCase):
         release.set()
         await asyncio.gather(*tasks)
 
+    async def test_automatic_discovery_is_disabled_by_default(self):
+        self.assertFalse(self.service.auto_discovery_enabled)
+        self.service.discover = AsyncMock()
+
+        await self.service.run_discovery_loop(interval=30)
+
+        self.service.discover.assert_not_awaited()
+
+    async def test_automatic_discovery_can_be_explicitly_enabled(self):
+        service = UnifiedCatalogPriceService(
+            self.catalog,
+            auto_discovery_enabled=True,
+        )
+        self.addAsyncCleanup(service.close)
+
+        self.assertTrue(service.auto_discovery_enabled)
+
     async def test_comparison_checks_six_sources_and_filters_wrong_variant(self):
         title = "Apple iPhone 17 Dual SIM 256GB Cosmic Orange"
         item = self.catalog.catalog.upsert(ExternalCatalogItem(
@@ -214,6 +232,30 @@ class PersistentUnifiedCatalogTest(unittest.IsolatedAsyncioTestCase):
                             for entry in result.offers))
         self.assertEqual(result.offers[0].price, 900)
 
+    async def test_fresh_comparison_does_not_repeat_retailer_requests(self):
+        title = "Google Pixel 9 Pro 256GB Obsidian"
+        product = self.catalog.catalog.upsert(ExternalCatalogItem(
+            source="Onliner", external_id="pixel-9", title=title,
+            url="https://example.test/pixel-9", price=2999, currency="BYN",
+            identity=ProductIdentity(brand="google", model="pixel 9 pro",
+                                     memory="256GB", color="black"),
+        ))
+        self.service._onliner_source.search_by_key = AsyncMock()
+        self.service._five_element_source.find_products = AsyncMock()
+        for _, source in self.service._offer_sources():
+            source.find_offers = AsyncMock()
+
+        result = await self.service.search_all_sources_by_onliner_key(
+            f"catalog:{product.key}",
+            "Google Pixel 9 Pro",
+        )
+
+        self.assertEqual([item.price for item in result.offers], [2999])
+        self.service._onliner_source.search_by_key.assert_not_awaited()
+        self.service._five_element_source.find_products.assert_not_awaited()
+        for _, source in self.service._offer_sources():
+            source.find_offers.assert_not_awaited()
+
     async def test_cache_is_labeled_only_when_all_sources_fail(self):
         title = "Apple iPhone 17 Dual SIM 256GB Black"
         product = self.catalog.catalog.upsert(ExternalCatalogItem(
@@ -221,6 +263,7 @@ class PersistentUnifiedCatalogTest(unittest.IsolatedAsyncioTestCase):
             url="https://example.test/onliner", price=999, currency="BYN",
             identity=ProductIdentity(brand="apple", model="iphone 17 dual sim",
                                      memory="256GB", color="black"),
+            updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
         ))
         async def failed(*args, **kwargs):
             raise RuntimeError("offline")

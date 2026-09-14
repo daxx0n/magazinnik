@@ -52,12 +52,18 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
         source_timeout=15.0,
         discovery_ttl=21600.0,
         inventory_ttl_days=30.0,
+        auto_discovery_enabled=None,
     ):
         super().__init__(catalog_service=catalog_service, catalog_search_enabled=True,
                          catalog_presentation_enabled=True, freshness_hours=0.25)
         self.source_timeout = source_timeout
         self.discovery_ttl = discovery_ttl
         self.inventory_ttl = timedelta(days=inventory_ttl_days)
+        self.auto_discovery_enabled = (
+            self._env_flag("CATALOG_AUTO_DISCOVERY_ENABLED")
+            if auto_discovery_enabled is None
+            else bool(auto_discovery_enabled)
+        )
         self._discovery_times = OrderedDict()
         self._requested_queries = OrderedDict()
         self._discovery_tasks = {}
@@ -273,6 +279,19 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
         if product is None:
             raise ProductNotFoundError("Карточка больше не существует. Повтори поиск.")
 
+        # A recent verified comparison is already accurate enough for the
+        # configured freshness window. Reusing it makes repeated selections
+        # instant and avoids six identical retailer requests.
+        fresh_offers = self._catalog_offers(product, fresh_only=True)
+        if fresh_offers:
+            return self._catalog_comparison(
+                product,
+                product_key,
+                original_query or product.title,
+                fresh_offers,
+                started,
+            )
+
         async def onliner():
             known = next((item for item in product.offers
                           if item.source.casefold() == "onliner" and item.external_id), None)
@@ -362,6 +381,9 @@ class UnifiedCatalogPriceService(CatalogFirstPriceService):
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def run_discovery_loop(self, interval=60):
+        if not self.auto_discovery_enabled:
+            logger.info("Automatic catalog discovery is disabled")
+            return
         configured = os.getenv("CATALOG_DISCOVERY_QUERIES", "")
         seeds = tuple(query.strip() for query in configured.split(";") if query.strip()) or DEFAULT_DISCOVERY_QUERIES
         cursor = 0

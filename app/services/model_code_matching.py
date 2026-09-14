@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from app.services.catalog_normalization import strip_regional_model_suffixes
 from app.services.model_selection import (
     color_neutral_title,
     significant_model_numbers,
@@ -71,7 +72,8 @@ def _separated_long_codes(value: str) -> tuple[set[str], set[str]]:
     codes: set[str] = set()
     parts: set[str] = set()
 
-    for raw_code in _SEPARATED_CODE_RE.findall(_normalize(value)):
+    normalized = strip_regional_model_suffixes(_normalize(value))
+    for raw_code in _SEPARATED_CODE_RE.findall(normalized):
         if _MEMORY_PAIR_RE.fullmatch(raw_code) is not None:
             continue
 
@@ -88,7 +90,7 @@ def _separated_long_codes(value: str) -> tuple[set[str], set[str]]:
 def explicit_long_model_codes(value: str) -> set[str]:
     """Returns explicit long codes such as GFY-LX1 or SM-S931B."""
 
-    normalized = _normalize(value)
+    normalized = strip_regional_model_suffixes(_normalize(value))
     codes, _ = _separated_long_codes(normalized)
 
     for token in re.findall(r"[a-zа-я0-9]+", normalized):
