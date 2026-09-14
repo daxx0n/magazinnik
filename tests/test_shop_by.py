@@ -155,6 +155,21 @@ class ShopBySourceTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(offers), 1)
                 self.assertEqual(offers[0].title, title)
 
+    async def test_rejects_monthly_payment_as_product_price(self) -> None:
+        source = ShopBySource()
+        source._download_search_page = AsyncMock(
+            return_value=offer_row(
+                "Стиральная машина Samsung WW90T554CAT/LP",
+                "25.00",
+                "seller.by — рассрочка, платёж в месяц",
+                "https%3A%2F%2Fseller.by%2Fwasher",
+            )
+        )
+
+        offers = await source.find_offers("Samsung WW90T554CAT", limit=5)
+
+        self.assertEqual(offers, [])
+
 
 if __name__ == "__main__":
     unittest.main()
