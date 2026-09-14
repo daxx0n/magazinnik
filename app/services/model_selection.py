@@ -2,6 +2,7 @@ import re
 from collections.abc import Iterable
 
 from app.models.product import ProductCandidate
+from app.services.catalog_normalization import strip_regional_model_suffixes
 from app.services.color_normalizer import (
     EXACT_VARIANT,
     extract_color_identity,
@@ -111,13 +112,6 @@ _NON_MODEL_NUMERIC_SUFFIXES = {
     "x",
 }
 
-_REGIONAL_MODEL_SUFFIX = re.compile(
-    r"(?<![a-zа-я0-9])"
-    r"([a-zа-я0-9-]{6,})\s*/\s*"
-    r"(?:lp|ru|by|eu|ua|kz|s[0-9]|[a-z]{2,3})"
-    r"(?![a-zа-я0-9])",
-    re.IGNORECASE,
-)
 _GENERIC_TYPE_WORDS = {
     "автомагнитола", "видеокарта", "духовой", "шкаф", "кофемашина",
     "монитор", "ноутбук", "планшет", "пылесос", "робот", "смартфон",
@@ -362,7 +356,7 @@ def model_variant_title(title: str) -> str:
     """Возвращает модель без памяти и цветового оформления."""
 
     result = color_neutral_title(title)
-    result = _REGIONAL_MODEL_SUFFIX.sub(r"\1", result)
+    result = strip_regional_model_suffixes(result)
     normalized = base_product_title(result)
     normalized = _strip_redundant_type_words(normalized)
     return normalized or title

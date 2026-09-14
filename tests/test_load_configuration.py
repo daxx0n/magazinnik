@@ -79,6 +79,16 @@ class LoadConfigurationTest(unittest.TestCase):
                 12,
             )
 
+    def test_source_cache_ttl_is_configurable(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"SOURCE_SEARCH_CACHE_TTL_SECONDS": "480"},
+            clear=False,
+        ):
+            service = PriceService()
+
+        self.assertEqual(service._source_search_cache_ttl, 480.0)
+
     def test_too_small_query_limit_does_not_break_search(self) -> None:
         with patch.dict(
             os.environ,

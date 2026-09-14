@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import os
 import re
 import time
@@ -59,7 +60,7 @@ class PriceService:
     _aggregate_search_limit = 100
     _electrosila_search_limit = 30
     _zeon_search_limit = 20
-    _source_search_cache_ttl = 30.0
+    _source_search_cache_ttl = 300.0
     _source_search_cache_size = 256
     _candidate_cache_size = 20_000
 
@@ -114,6 +115,10 @@ class PriceService:
                 "SOURCE_SEARCH_MAX_CONCURRENCY",
                 12,
             )
+        )
+        self._source_search_cache_ttl = self._positive_environment_float(
+            "SOURCE_SEARCH_CACHE_TTL_SECONDS",
+            self._source_search_cache_ttl,
         )
 
     async def find_onliner_products(
@@ -622,6 +627,14 @@ class PriceService:
         except ValueError:
             return default
         return value if value > 0 else default
+
+    @staticmethod
+    def _positive_environment_float(name: str, default: float) -> float:
+        try:
+            value = float(os.getenv(name, "").strip())
+        except ValueError:
+            return default
+        return value if math.isfinite(value) and value > 0 else default
 
     @staticmethod
     async def _timed_result(

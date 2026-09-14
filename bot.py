@@ -70,11 +70,14 @@ async def main() -> None:
             ),
             name="price-alert-loop",
         ),
-        asyncio.create_task(
-            search.price_service.run_discovery_loop(),
-            name="catalog-discovery-loop",
-        ),
     ]
+    if search.price_service.auto_discovery_enabled:
+        background_tasks.append(
+            asyncio.create_task(
+                search.price_service.run_discovery_loop(),
+                name="catalog-discovery-loop",
+            )
+        )
     if catalog_refresh_service.enabled:
         background_tasks.append(
             asyncio.create_task(

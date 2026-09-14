@@ -8,6 +8,7 @@ from app.services.price_sanity import (
     is_plausible_full_price,
 )
 from app.services.product_identity import ProductIdentityBuilder
+from app.services.catalog_first_search import CatalogFirstPriceService
 from app.services.master_catalog import MasterCatalog
 from app.services.catalog_adapter import CatalogOfferAdapter
 
@@ -74,6 +75,22 @@ class UniversalCatalogRegressionTest(unittest.TestCase):
 
         self.assertEqual(len(catalog.products), 1)
         self.assertEqual(catalog.offer_count, 3)
+
+    def test_live_matcher_accepts_washer_region_codes(self) -> None:
+        canonical = "Стиральная машина Samsung WW90T554CAT/LP"
+
+        for candidate in (
+            "Samsung WW90T554CAT/S7",
+            "Samsung Стиральная машина Samsung WW90T554CAT",
+        ):
+            with self.subTest(candidate=candidate):
+                self.assertIsNone(
+                    CatalogFirstPriceService._model_mismatch_reason(
+                        canonical,
+                        candidate,
+                        requested_title=canonical,
+                    )
+                )
 
     def test_payment_fragment_is_not_a_washer_price(self) -> None:
         title = "Стиральная машина Samsung WW90T554CAT/LP"
